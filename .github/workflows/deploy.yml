@@ -58,21 +58,11 @@ jobs:
           key: ${{ secrets.SERVER_PEM_KEY }}
           port: 22
           script: |
-            IMAGE_NAME=${{ secrets.DOCKERHUB_USERNAME }}/cokathon-6:latest
-            CONTAINER_NAME=cokathon-6
-
-            # Docker Hub에서 최신 이미지를 가져옵니다.
-            docker pull $IMAGE_NAME
-
-            # 기존 컨테이너가 있으면 중지하고 삭제합니다.
-            if [ $(docker ps -a -q -f name=^/${CONTAINER_NAME}$) ]; then
-                docker stop $CONTAINER_NAME
-                docker rm $CONTAINER_NAME
-            fi
-
-            # 새 컨테이너를 실행합니다.
+            cd /home/ec2-user/backend
+            docker pull ${{ secrets.DOCKERHUB_USERNAME }}/cokathon-6:latest
+            docker stop cokathon-6 || true
+            docker rm cokathon-6 || true
             docker run -d \
-              --name $CONTAINER_NAME \
+              --name cokathon-6 \
               -p 8080:8080 \
-              --restart always \
-              $IMAGE_NAME
+              ${{ secrets.DOCKERHUB_USERNAME }}/cokathon-6:latest
