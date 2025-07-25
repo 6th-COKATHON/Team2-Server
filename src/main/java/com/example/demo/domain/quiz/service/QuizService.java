@@ -9,8 +9,13 @@ import org.springframework.transaction.annotation.Transactional;
 
 import com.example.demo.common.error.ErrorCode;
 import com.example.demo.common.error.exception.AppException;
+import com.example.demo.domain.article.entity.Article;
+import com.example.demo.domain.article.repository.ArticleRepository;
 import com.example.demo.domain.quiz.dto.request.QuizAnswerDto;
+import com.example.demo.domain.quiz.dto.request.QuizBulkUploadRequest;
 import com.example.demo.domain.quiz.dto.request.QuizGradingRequest;
+import com.example.demo.domain.quiz.dto.request.QuizQuestionUploadDto;
+import com.example.demo.domain.quiz.dto.request.QuizUploadRequest;
 import com.example.demo.domain.quiz.dto.response.QuizGradingResponse;
 import com.example.demo.domain.quiz.dto.response.QuizQuestionDto;
 import com.example.demo.domain.quiz.dto.response.QuizResponseDto;
@@ -26,6 +31,39 @@ import lombok.RequiredArgsConstructor;
 public class QuizService {
 	
 	private final QuizQuestionRepository quizQuestionRepository;
+	private final ArticleRepository articleRepository;
+	
+	/**
+	 * 여러 기사의 퀴즈 문제들을 한 번에 업로드합니다.
+	 */
+	@Transactional
+	public void bulkUploadQuiz(QuizBulkUploadRequest request) {
+		// 모든 기사의 퀴즈를 순차적으로 업로드
+		request.quizzes().forEach(this::uploadQuiz);
+	}
+	
+	/**
+	 * 퀴즈 문제들을 업로드합니다.
+	 */
+	@Transactional
+	public void uploadQuiz(QuizUploadRequest request) {
+		// Article 존재 여부 확인
+		Article article = articleRepository.findById(request.articleId())
+			.orElseThrow(() -> new AppException(ErrorCode.NOT_FOUND_EXCEPTION));
+		
+		// 기존 퀴즈 문제들 삭제 (중복 방지)
+		List<QuizQuestion> existingQuestions = quizQuestionRepository.findByArticleId(request.articleId());
+		if (!existingQuestions.isEmpty()) {
+			quizQuestionRepository.deleteAll(existingQuestions);
+		}
+		
+		// 새로운 퀴즈 문제들 저장
+		List<QuizQuestion> quizQuestions = request.questions().stream()
+			.map(dto -> QuizQuestion.of(dto.id(), article, dto.question(), dto.correctAnswer()))
+			.collect(Collectors.toList());
+		
+		quizQuestionRepository.saveAll(quizQuestions);
+	}
 	
 	/**
 	 * 특정 기사의 퀴즈 문제들을 조회합니다.
