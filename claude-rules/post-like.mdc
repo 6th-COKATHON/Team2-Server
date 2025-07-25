@@ -1,0 +1,42 @@
+---
+alwaysApply: false
+---
+### **Step-by-Step Decision Framework (Chain-of-Thought)**
+
+You must follow this sequence of analysis when generating a design:
+
+**Step 1: Assess Scale and Real-time Requirements**
+First, always clarify the expected scale. Ask me or make a reasonable assumption about:
+* **Traffic Volume:** "Is this for a low-traffic internal tool, a medium-traffic public website, or a high-traffic social media application (e.g., millions of 'likes' per hour)?"
+* **Data Volume:** "How many items can be 'liked' (e.g., 10,000 products, 100 million posts)?"
+* **Real-time Criticality:** "Is it acceptable for the public 'like' count on a list to have a slight delay (seconds to minutes)?"
+
+**Step 2: Propose the Data Model**
+Based on the assessment, propose a data model.
+* **For almost all non-trivial applications, you MUST recommend a separate 'meta-data' or 'statistics' table.** This table should store the aggregated count (e.g., `(item_id, like_count)`).
+* **Explicitly advise AGAINST adding a `like_count` column directly to the core domain table** (e.g., `Products`, `Reviews`). Justify this by explaining that it "pollutes" the domain model and creates a hotspot for database contention.
+* **Explicitly advise AGAINST a naive `GROUP BY` and `COUNT` on the raw `likes` table** for list views, explaining that it does not scale for pagination over large datasets.
+
+**Step 3: Select the Update Strategy**
+Based on the traffic volume from Step 1, select the appropriate strategy for updating the meta-data table.
+
+* **If traffic is LOW:** Propose a **Synchronous Update**. The `like_count` is updated within the same database transaction as the 'like' action. Acknowledge the risk of contention.
+* **If traffic is MEDIUM to HIGH:** Propose an **Asynchronous Update**. The 'like' action returns success to the user immediately, and the count is updated in the background (e.g., via an async thread or task queue).
+* **If traffic is VERY HIGH:** Propose an **Event-Driven Architecture**. The 'like' action publishes an event to a message queue (e.g., Kafka, RabbitMQ). A separate consumer service processes these events to update the count table. This is the most scalable approach.
+
+**Step 4: Address Complex Sorting and Filtering**
+If the requirements include sorting by 'like' count combined with other complex filters:
+* Identify this as a **"Search" problem**, not a simple database query problem.
+* **Recommend separating this functionality into a dedicated search service** (e.g., Elasticsearch).
+* Explain the workflow: The primary database and meta-data tables push updates to the search service, which then handles the complex query and returns a list of sorted IDs. The main application then fetches the full details for those IDs from the primary database.
+
+---
+
+### **Final Output Structure**
+
+Your final recommendation must be structured with the following sections:
+1.  **Assumptions:** State the assumed scale and traffic.
+2.  **Proposed Data Model:** Describe the tables, especially the separate meta-data table.
+3.  **Update Strategy:** Detail the chosen update mechanism (Sync, Async, or Event-Driven) and justify the choice.
+4.  **API Flow:** Briefly outline the sequence of events when a user clicks 'like'.
+5.  **Scalability & Trade-offs:** Summarize why the design is scalable and what trade-offs were made (e.g., consistency vs. performance).

@@ -1,0 +1,364 @@
+---
+alwaysApply: true
+---
+
+# Project Architecture & Structure Rules
+
+## 🏗️ MANDATORY PROJECT STRUCTURE
+
+This project follows **Domain-Driven Design (DDD)** with **Layered Architecture**. 
+
+### ✅ MUST DO - Layer Organization
+
+**Domain Layer (`domain/`):**
+```
+domain/
+├── [domain-name]/
+│   ├── entity/     # JPA entities ONLY
+│   ├── service/    # Business logic ONLY
+│   ├── repository/ # Data access interfaces ONLY
+│   ├── enums/      # Domain-specific enums
+│   └── dto/        # Internal domain DTOs (optional)
+```
+
+**Web Layer (`web/`):**
+```
+web/
+├── [domain-name]/
+│   ├── controller/ # REST controllers ONLY
+│   └── dto/        # Request/Response DTOs ONLY
+```
+
+**Common Layer (`common/`):**
+```
+common/
+├── entity/         # Base entities (BaseEntity)
+├── response/       # Standard response wrappers
+├── error/          # Exception handling
+├── security/       # Security configurations
+├── config/         # Spring configurations
+└── [feature]/      # Cross-cutting concerns
+```
+
+### ✅ MUST DO - Dependency Rules
+
+1. **Web Layer** → **Domain Layer** → **Common Layer**
+2. **Controllers** call **Services** ONLY
+3. **Services** call **Repositories** and other **Services**
+4. **Entities** contain business logic and validation
+5. Use **@Transactional** at Service layer ONLY
+
+### ❌ NEVER DO - Architecture Violations
+
+1. **NEVER** put business logic in Controllers
+2. **NEVER** call Repositories directly from Controllers
+3. **NEVER** create circular dependencies between domains
+4. **NEVER** mix Web DTOs with Domain entities
+5. **NEVER** put @Transactional on Controller methods
+6. **NEVER** create dependencies from Common to Domain/Web layers
+
+## 🎯 MANDATORY NAMING CONVENTIONS
+
+### ✅ MUST DO - Class Naming
+
+- **Entities**: `[Domain]Entity` (e.g., `UserEntity`, `PostEntity`)
+- **Services**: `[Domain]Service` or `[Domain][Feature]Service`
+- **Controllers**: `[Domain]Controller`
+- **Repositories**: `[Domain]EntityRepository`
+- **DTOs**: `[Action][Domain]Request/Response`
+
+### ✅ MUST DO - Package Naming
+
+- Use **singular** form: `user`, `post`, `postReview`
+- Use **camelCase** for multi-word: `postReview`, `userCoin`
+- Domain packages must match entity names
+
+### ❌ NEVER DO - Naming Violations
+
+1. **NEVER** use generic names like `Service`, `Controller`, `Repository`
+2. **NEVER** use plural package names
+3. **NEVER** mix naming patterns within the same domain
+4. **NEVER** use abbreviations except for well-known terms (DTO, API, etc.)
+
+## 🔧 MANDATORY CONFIGURATION PATTERNS
+
+### ✅ MUST DO - Configuration Organization
+
+```java
+// Configuration classes in common/config/
+@Configuration
+@EnableJpaAuditing    // For BaseEntity
+@RequiredArgsConstructor
+public class JpaAuditingConfig {
+    // JPA configurations
+}
+
+@Configuration
+@EnableWebSecurity
+public class SecurityConfig {
+    // Security configurations
+}
+```
+
+### ✅ MUST DO - Property Management
+
+```java
+// Use @ConfigurationProperties for complex properties
+@ConfigurationProperties(prefix = "jwt")
+@Data
+public class TokenProperty {
+    private String secretKey;
+    private Long accessExpiration;
+    private Long refreshExpiration;
+}
+```
+
+### ❌ NEVER DO - Configuration Violations
+
+1. **NEVER** hardcode configuration values
+2. **NEVER** mix different configuration concerns in one class
+3. **NEVER** create configuration classes in domain packages
+4. **NEVER** use @Value for complex property structures
+
+## 🎯 MANDATORY INTEGRATION PATTERNS
+
+### ✅ MUST DO - External Service Integration
+
+```java
+// Create dedicated service classes for external integrations
+@Service
+@RequiredArgsConstructor
+public class S3ImageService {
+    // S3 specific operations
+}
+
+@Service
+@RequiredArgsConstructor
+public class EmailSender {
+    // Email sending operations
+}
+```
+
+### ✅ MUST DO - Event-Driven Architecture
+
+```java
+// Use Spring Events for cross-domain communication
+@Component
+public class UserEventListener {
+    @EventListener
+    @Async
+    public void handleUserCreated(UserCreatedEvent event) {
+        // Handle user creation side effects
+    }
+}
+```
+
+### ❌ NEVER DO - Integration Violations
+
+1. **NEVER** call external services directly from Controllers
+2. **NEVER** mix business logic with external service calls
+3. **NEVER** create tight coupling between domains
+4. **NEVER** expose external service models as API responses
+
+## 🔍 ARCHITECTURE VALIDATION CHECKLIST
+
+Before committing code, ensure:
+
+✅ All classes are in correct packages
+✅ Dependencies flow in correct direction
+✅ Business logic is in Service layer
+✅ No circular dependencies exist
+✅ Configuration is properly externalized
+✅ Domain boundaries are respected
+✅ Naming conventions are followed consistently
+
+## 🚨 CRITICAL VIOLATIONS TO AVOID
+
+1. **Business Logic in Controllers** - Move to Services immediately
+2. **Direct Repository Calls from Controllers** - Always use Services
+3. **Circular Dependencies** - Redesign architecture
+4. **Mixed Concerns** - Separate into appropriate layers
+5. **Hardcoded Values** - Use configuration properties
+6. **Cross-Domain Direct Calls** - Use events or shared services
+
+Remember: **Architecture is not negotiable**. These rules ensure maintainability, testability, and scalability of the codebase.
+# Project Architecture & Structure Rules
+
+## 🏗️ MANDATORY PROJECT STRUCTURE
+
+This project follows **Domain-Driven Design (DDD)** with **Layered Architecture**. 
+
+### ✅ MUST DO - Layer Organization
+
+**Domain Layer (`domain/`):**
+```
+domain/
+├── [domain-name]/
+│   ├── entity/     # JPA entities ONLY
+│   ├── service/    # Business logic ONLY
+│   ├── repository/ # Data access interfaces ONLY
+│   ├── enums/      # Domain-specific enums
+│   └── dto/        # Internal domain DTOs (optional)
+```
+
+**Web Layer (`web/`):**
+```
+web/
+├── [domain-name]/
+│   ├── controller/ # REST controllers ONLY
+│   └── dto/        # Request/Response DTOs ONLY
+```
+
+**Common Layer (`common/`):**
+```
+common/
+├── entity/         # Base entities (BaseEntity)
+├── response/       # Standard response wrappers
+├── error/          # Exception handling
+├── security/       # Security configurations
+├── config/         # Spring configurations
+└── [feature]/      # Cross-cutting concerns
+```
+
+### ✅ MUST DO - Dependency Rules
+
+1. **Web Layer** → **Domain Layer** → **Common Layer**
+2. **Controllers** call **Services** ONLY
+3. **Services** call **Repositories** and other **Services**
+4. **Entities** contain business logic and validation
+5. Use **@Transactional** at Service layer ONLY
+
+### ❌ NEVER DO - Architecture Violations
+
+1. **NEVER** put business logic in Controllers
+2. **NEVER** call Repositories directly from Controllers
+3. **NEVER** create circular dependencies between domains
+4. **NEVER** mix Web DTOs with Domain entities
+5. **NEVER** put @Transactional on Controller methods
+6. **NEVER** create dependencies from Common to Domain/Web layers
+
+## 🎯 MANDATORY NAMING CONVENTIONS
+
+### ✅ MUST DO - Class Naming
+
+- **Entities**: `[Domain]Entity` (e.g., `UserEntity`, `PostEntity`)
+- **Services**: `[Domain]Service` or `[Domain][Feature]Service`
+- **Controllers**: `[Domain]Controller`
+- **Repositories**: `[Domain]EntityRepository`
+- **DTOs**: `[Action][Domain]Request/Response`
+
+### ✅ MUST DO - Package Naming
+
+- Use **singular** form: `user`, `post`, `postReview`
+- Use **camelCase** for multi-word: `postReview`, `userCoin`
+- Domain packages must match entity names
+
+### ❌ NEVER DO - Naming Violations
+
+1. **NEVER** use generic names like `Service`, `Controller`, `Repository`
+2. **NEVER** use plural package names
+3. **NEVER** mix naming patterns within the same domain
+4. **NEVER** use abbreviations except for well-known terms (DTO, API, etc.)
+
+## 🔧 MANDATORY CONFIGURATION PATTERNS
+
+### ✅ MUST DO - Configuration Organization
+
+```java
+// Configuration classes in common/config/
+@Configuration
+@EnableJpaAuditing    // For BaseEntity
+@RequiredArgsConstructor
+public class JpaAuditingConfig {
+    // JPA configurations
+}
+
+@Configuration
+@EnableWebSecurity
+public class SecurityConfig {
+    // Security configurations
+}
+```
+
+### ✅ MUST DO - Property Management
+
+```java
+// Use @ConfigurationProperties for complex properties
+@ConfigurationProperties(prefix = "jwt")
+@Data
+public class TokenProperty {
+    private String secretKey;
+    private Long accessExpiration;
+    private Long refreshExpiration;
+}
+```
+
+### ❌ NEVER DO - Configuration Violations
+
+1. **NEVER** hardcode configuration values
+2. **NEVER** mix different configuration concerns in one class
+3. **NEVER** create configuration classes in domain packages
+4. **NEVER** use @Value for complex property structures
+
+## 🎯 MANDATORY INTEGRATION PATTERNS
+
+### ✅ MUST DO - External Service Integration
+
+```java
+// Create dedicated service classes for external integrations
+@Service
+@RequiredArgsConstructor
+public class S3ImageService {
+    // S3 specific operations
+}
+
+@Service
+@RequiredArgsConstructor
+public class EmailSender {
+    // Email sending operations
+}
+```
+
+### ✅ MUST DO - Event-Driven Architecture
+
+```java
+// Use Spring Events for cross-domain communication
+@Component
+public class UserEventListener {
+    @EventListener
+    @Async
+    public void handleUserCreated(UserCreatedEvent event) {
+        // Handle user creation side effects
+    }
+}
+```
+
+### ❌ NEVER DO - Integration Violations
+
+1. **NEVER** call external services directly from Controllers
+2. **NEVER** mix business logic with external service calls
+3. **NEVER** create tight coupling between domains
+4. **NEVER** expose external service models as API responses
+
+## 🔍 ARCHITECTURE VALIDATION CHECKLIST
+
+Before committing code, ensure:
+
+✅ All classes are in correct packages
+✅ Dependencies flow in correct direction
+✅ Business logic is in Service layer
+✅ No circular dependencies exist
+✅ Configuration is properly externalized
+✅ Domain boundaries are respected
+✅ Naming conventions are followed consistently
+
+## 🚨 CRITICAL VIOLATIONS TO AVOID
+
+1. **Business Logic in Controllers** - Move to Services immediately
+2. **Direct Repository Calls from Controllers** - Always use Services
+3. **Circular Dependencies** - Redesign architecture
+4. **Mixed Concerns** - Separate into appropriate layers
+5. **Hardcoded Values** - Use configuration properties
+6. **Cross-Domain Direct Calls** - Use events or shared services
+
+Remember: **Architecture is not negotiable**. These rules ensure maintainability, testability, and scalability of the codebase.

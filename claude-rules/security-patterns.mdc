@@ -1,0 +1,687 @@
+---
+globs: "*Security*.java,*Auth*.java,*Jwt*.java,*OAuth*.java"
+---
+
+# Security & Authentication Patterns
+
+## 🔐 MANDATORY SECURITY ARCHITECTURE
+
+### ✅ MUST DO - JWT Token Security
+
+**JWT Token Structure:**
+```java
+@Component
+@RequiredArgsConstructor
+public class JwtTokenProvider {
+    
+    private final TokenProperty tokenProperty;
+    private final BlackListRepository blackListRepository;
+    
+    public Token createToken(UserEntity user) {
+        String accessToken = createAccessToken(user);
+        String refreshToken = createRefreshToken(user);
+        
+        return new Token(accessToken, refreshToken);
+    }
+    
+    private String createAccessToken(UserEntity user) {
+        return Jwts.builder()
+            .setSubject(user.getId().toString())
+            .claim("email", user.getEmail())
+            .claim("role", user.getUserRole())
+            .claim("type", "ACCESS_TOKEN")
+            .setIssuedAt(new Date())
+            .setExpiration(new Date(System.currentTimeMillis() + tokenProperty.getAccessExpiration()))
+            .signWith(getSigningKey(), SignatureAlgorithm.HS512)
+            .compact();
+    }
+    
+    public void validateToken(String token) {
+        if (blackListRepository.existsById(token)) {
+            throw new AppException(ErrorCode.TOKEN_BLACKLISTED_EXCEPTION);
+        }
+        
+        try {
+            Jwts.parserBuilder()
+                .setSigningKey(getSigningKey())
+                .build()
+                .parseClaimsJws(token);
+        } catch (ExpiredJwtException e) {
+            throw new AppException(ErrorCode.JWT_EXPIRED_EXCEPTION);
+        } catch (JwtException e) {
+            throw new AppException(ErrorCode.JWT_INVALID_EXCEPTION);
+        }
+    }
+}
+```
+
+**Token Blacklist Management:**
+```java
+@Service
+@RequiredArgsConstructor
+public class AuthService {
+    
+    private final BlackListRepository blackListRepository;
+    private final JwtTokenProvider jwtTokenProvider;
+    
+    @Transactional
+    public void logout(String accessToken) {
+        // Add token to blacklist
+        blackListRepository.save(new BlackList(accessToken));
+        
+        // Extract user and remove refresh token
+        UserEntity user = jwtTokenProvider.getUser(accessToken)
+            .orElseThrow(() -> new AppException(ErrorCode.JWT_INVALID_EXCEPTION));
+        
+        refreshTokenRepository.deleteById(user.getId());
+    }
+}
+```
+
+### ✅ MUST DO - Authentication Filter Chain
+
+**JWT Authentication Filter:**
+```java
+@Component
+@RequiredArgsConstructor
+@Slf4j
+public class JwtAuthenticationFilter extends OncePerRequestFilter {
+    
+    private final JwtTokenProvider jwtTokenProvider;
+    private final SecurityProperties securityProperties;
+    
+    @Override
+    protected void doFilterInternal(HttpServletRequest request, 
+                                   HttpServletResponse response, 
+                                   FilterChain filterChain) throws ServletException, IOException {
+        
+        String requestURI = request.getRequestURI();
+        String method = request.getMethod();
+        
+        // Skip authentication for permitted URLs
+        if (isPermittedUrl(method, requestURI)) {
+            filterChain.doFilter(request, response);
+            return;
+        }
+        
+        try {
+            String token = extractTokenFromRequest(request);
+            if (token != null) {
+                jwtTokenProvider.validateToken(token);
+                setAuthenticationContext(token);
+            }
+        } catch (AppException e) {
+            log.warn("JWT authentication failed: {}", e.getMessage());
+            throw e;
+        }
+        
+        filterChain.doFilter(request, response);
+    }
+    
+    private void setAuthenticationContext(String token) {
+        UserEntity user = jwtTokenProvider.getUser(token)
+            .orElseThrow(() -> new AppException(ErrorCode.JWT_INVALID_EXCEPTION));
+        
+        Authentication authentication = new UsernamePasswordAuthenticationToken(
+            user, null, user.getAuthorities());
+        SecurityContextHolder.getContext().setAuthentication(authentication);
+    }
+}
+```
+
+### ✅ MUST DO - Security Configuration
+
+**Spring Security Configuration:**
+```java
+@Configuration
+@EnableWebSecurity
+@RequiredArgsConstructor
+public class SecurityConfig {
+    
+    private final JwtAuthenticationFilter jwtAuthenticationFilter;
+    private final SecurityExceptionFilter securityExceptionFilter;
+    private final CorsConfigurationSource corsConfigurationSource;
+    
+    @Bean
+    public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
+        return http
+            .csrf(AbstractHttpConfigurer::disable)
+            .cors(cors -> cors.configurationSource(corsConfigurationSource))
+            .formLogin(AbstractHttpConfigurer::disable)
+            .httpBasic(AbstractHttpConfigurer::disable)
+            .sessionManagement(session -> session
+                .sessionCreationPolicy(SessionCreationPolicy.STATELESS))
+            .authorizeHttpRequests(auth -> auth
+                .requestMatchers(permitAllPaths()).permitAll()
+                .anyRequest().authenticated())
+            .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class)
+            .addFilterBefore(securityExceptionFilter, JwtAuthenticationFilter.class)
+            .oauth2Login(oauth2 -> oauth2
+                .userInfoEndpoint(userInfo -> userInfo.userService(customOAuth2UserService))
+                .successHandler(oAuthSuccessHandler))
+            .build();
+    }
+    
+    private RequestMatcher[] permitAllPaths() {
+        return securityProperties.getPermitUrls().stream()
+            .map(this::parsePermitUrl)
+            .toArray(RequestMatcher[]::new);
+    }
+}
+```
+
+### ❌ NEVER DO - Security Architecture Violations
+
+1. **NEVER** store JWT tokens in localStorage (use httpOnly cookies)
+2. **NEVER** include sensitive data in JWT payload
+3. **NEVER** use weak signing algorithms (always use HS512 or RS256)
+4. **NEVER** skip token validation
+5. **NEVER** ignore token expiration
+6. **NEVER** use hardcoded secrets
+7. **NEVER** skip CORS configuration
+
+## 🛡️ MANDATORY OAUTH2 INTEGRATION
+
+### ✅ MUST DO - OAuth2 User Service
+
+**Custom OAuth2 User Service:**
+```java
+@Component
+@RequiredArgsConstructor
+@Slf4j
+public class CustomOAuth2UserService implements OAuth2UserService<OAuth2UserRequest, OAuth2User> {
+    
+    private final UserEntityRepository userRepository;
+    private final DefaultOAuth2UserService defaultOAuth2UserService;
+    
+    @Override
+    public OAuth2User loadUser(OAuth2UserRequest userRequest) throws OAuth2AuthenticationException {
+        OAuth2User oauth2User = defaultOAuth2UserService.loadUser(userRequest);
+        
+        String registrationId = userRequest.getClientRegistration().getRegistrationId();
+        OAuth2Attribute oauth2Attribute = OAuth2Attribute.of(registrationId, oauth2User.getAttributes());
+        
+        UserEntity user = saveOrUpdateUser(oauth2Attribute);
+        
+        return new CustomOAuth2User(user, oauth2User.getAttributes());
+    }
+    
+    private UserEntity saveOrUpdateUser(OAuth2Attribute oauth2Attribute) {
+        return userRepository.findByEmail(oauth2Attribute.getEmail())
+            .map(user -> user.update(oauth2Attribute.getEmail(), oauth2Attribute.getName()))
+            .orElseGet(() -> userRepository.save(oauth2Attribute.toEntity()));
+    }
+}
+```
+
+**OAuth2 Success Handler:**
+```java
+@Component
+@RequiredArgsConstructor
+@Slf4j
+public class OAuthSuccessHandler implements AuthenticationSuccessHandler {
+    
+    private final JwtTokenProvider jwtTokenProvider;
+    private final RefreshTokenRepository refreshTokenRepository;
+    
+    @Override
+    public void onAuthenticationSuccess(HttpServletRequest request, 
+                                       HttpServletResponse response, 
+                                       Authentication authentication) throws IOException {
+        
+        CustomOAuth2User oAuth2User = (CustomOAuth2User) authentication.getPrincipal();
+        UserEntity user = oAuth2User.getUser();
+        
+        Token token = jwtTokenProvider.createToken(user);
+        
+        // Save refresh token
+        refreshTokenRepository.save(new RefreshToken(user.getId(), token.refreshToken()));
+        
+        // Set tokens in response
+        response.setHeader("Authorization", "Bearer " + token.accessToken());
+        response.addCookie(createRefreshTokenCookie(token.refreshToken()));
+        
+        // Redirect to frontend
+        response.sendRedirect("https://frontend.example.com/auth/callback");
+    }
+    
+    private Cookie createRefreshTokenCookie(String refreshToken) {
+        Cookie cookie = new Cookie("refreshToken", refreshToken);
+        cookie.setHttpOnly(true);
+        cookie.setSecure(true);
+        cookie.setPath("/");
+        cookie.setMaxAge(14 * 24 * 60 * 60); // 14 days
+        return cookie;
+    }
+}
+```
+
+### ❌ NEVER DO - OAuth2 Violations
+
+1. **NEVER** store OAuth2 tokens in plain text
+2. **NEVER** skip OAuth2 state validation
+3. **NEVER** ignore OAuth2 scope limitations
+4. **NEVER** trust OAuth2 data without validation
+5. **NEVER** hardcode OAuth2 redirect URLs
+6. **NEVER** expose OAuth2 client secrets
+
+## 🔒 MANDATORY PASSWORD SECURITY
+
+### ✅ MUST DO - Password Management
+
+**Password Encoding:**
+```java
+@Configuration
+public class EncodeConfig {
+    
+    @Bean
+    public BCryptPasswordEncoder passwordEncoder() {
+        return new BCryptPasswordEncoder(12); // Use strong cost factor
+    }
+}
+```
+
+**Password Validation:**
+```java
+@Target(ElementType.FIELD)
+@Retention(RetentionPolicy.RUNTIME)
+@Constraint(validatedBy = PasswordValidator.class)
+public @interface Password {
+    String message() default "비밀번호는 8자 이상 20자 이하, 영문, 숫자, 특수문자를 포함해야 합니다.";
+    Class<?>[] groups() default {};
+    Class<? extends Payload>[] payload() default {};
+}
+
+@Component
+public class PasswordValidator implements ConstraintValidator<Password, String> {
+    
+    private static final String PASSWORD_PATTERN = 
+        "^(?=.*[a-zA-Z])(?=.*\\d)(?=.*[@$!%*?&])[A-Za-z\\d@$!%*?&]{8,20}$";
+    
+    private Pattern pattern;
+    
+    @Override
+    public void initialize(Password constraintAnnotation) {
+        pattern = Pattern.compile(PASSWORD_PATTERN);
+    }
+    
+    @Override
+    public boolean isValid(String password, ConstraintValidatorContext context) {
+        if (password == null || password.isEmpty()) {
+            return false;
+        }
+        return pattern.matcher(password).matches();
+    }
+}
+```
+
+### ✅ MUST DO - User Authentication
+
+**Authentication Service:**
+```java
+@Service
+@RequiredArgsConstructor
+@Transactional(readOnly = true)
+public class AuthService {
+    
+    private final UserEntityRepository userRepository;
+    private final BCryptPasswordEncoder passwordEncoder;
+    private final JwtTokenProvider jwtTokenProvider;
+    
+    @Transactional
+    public LoginResponse login(String email, String password) {
+        UserEntity user = userRepository.findByEmail(email)
+            .orElseThrow(() -> new AppException(ErrorCode.USER_NOT_FOUND_EXCEPTION));
+        
+        if (!passwordEncoder.matches(password, user.getPassword())) {
+            throw new AppException(ErrorCode.USER_PASSWORD_MISMATCH_EXCEPTION);
+        }
+        
+        Token token = jwtTokenProvider.createToken(user);
+        
+        // Save refresh token
+        refreshTokenRepository.save(new RefreshToken(user.getId(), token.refreshToken()));
+        
+        return new LoginResponse(token.accessToken(), token.refreshToken());
+    }
+}
+```
+
+### ❌ NEVER DO - Password Security Violations
+
+1. **NEVER** store passwords in plain text
+2. **NEVER** use weak password hashing algorithms (MD5, SHA1)
+3. **NEVER** skip password strength validation
+4. **NEVER** log passwords in any form
+5. **NEVER** transmit passwords over HTTP
+6. **NEVER** use default or weak salt values
+
+## 👤 MANDATORY USER CONTEXT MANAGEMENT
+
+### ✅ MUST DO - Current User Resolution
+
+**Current User Annotation:**
+```java
+@Target(ElementType.PARAMETER)
+@Retention(RetentionPolicy.RUNTIME)
+public @interface CurrentUser {
+}
+```
+
+**Current User Argument Resolver:**
+```java
+@Component
+@RequiredArgsConstructor
+public class CurrentUserArgumentResolver implements HandlerMethodArgumentResolver {
+    
+    @Override
+    public boolean supportsParameter(MethodParameter parameter) {
+        return parameter.hasParameterAnnotation(CurrentUser.class) 
+            && parameter.getParameterType().equals(UserEntity.class);
+    }
+    
+    @Override
+    public Object resolveArgument(MethodParameter parameter, 
+                                  ModelAndViewContainer mavContainer,
+                                  NativeWebRequest webRequest, 
+                                  WebDataBinderFactory binderFactory) {
+        
+        Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
+        
+        if (authentication == null || !authentication.isAuthenticated()) {
+            throw new AppException(ErrorCode.USER_NOT_AUTHENTICATED_EXCEPTION);
+        }
+        
+        Object principal = authentication.getPrincipal();
+        
+        if (!(principal instanceof UserEntity)) {
+            throw new AppException(ErrorCode.INVALID_PRINCIPAL_TYPE_EXCEPTION);
+        }
+        
+        return principal;
+    }
+}
+```
+
+**Usage in Controllers:**
+```java
+@RestController
+@RequestMapping("/api/users")
+public class UserController {
+    
+    @GetMapping("/me")
+    @Operation(summary = "현재 사용자 정보 조회")
+    public ResponseEntity<AppResponse<UserInfoResponse>> getCurrentUser(
+        @CurrentUser UserEntity user) {
+        
+        return ResponseEntity.ok(AppResponse.ok(userService.getUserInfo(user)));
+    }
+}
+```
+
+### ❌ NEVER DO - User Context Violations
+
+1. **NEVER** access SecurityContext directly in business logic
+2. **NEVER** trust user ID from request parameters
+3. **NEVER** skip user authentication checks
+4. **NEVER** expose user credentials in responses
+5. **NEVER** cache user context across requests
+
+## 🔐 MANDATORY AUTHORIZATION PATTERNS
+
+### ✅ MUST DO - Resource-Based Authorization
+
+**Entity-Level Authorization:**
+```java
+@Entity
+@Table(name = "posts")
+public class PostEntity extends BaseEntity {
+    
+    // ... fields
+    
+    public void validateOwnership(UserEntity user) {
+        if (!this.user.getId().equals(user.getId())) {
+            throw new AppException(ErrorCode.POST_ROLE_EXCEPTION);
+        }
+    }
+    
+    public boolean isOwner(UserEntity user) {
+        return this.user.getId().equals(user.getId());
+    }
+}
+```
+
+**Service-Level Authorization:**
+```java
+@Service
+@RequiredArgsConstructor
+public class PostService {
+    
+    private final PostEntityRepository postRepository;
+    
+    @Transactional
+    public void deletePost(Long postId, UserEntity user) {
+        PostEntity post = postRepository.findById(postId)
+            .orElseThrow(() -> new AppException(ErrorCode.POST_NOT_FOUND_EXCEPTION));
+        
+        // Check ownership
+        post.validateOwnership(user);
+        
+        postRepository.delete(post);
+    }
+}
+```
+
+### ✅ MUST DO - Role-Based Authorization
+
+**User Role Enum:**
+```java
+public enum UserRole {
+    USER("ROLE_USER"),
+    ADMIN("ROLE_ADMIN");
+    
+    private final String key;
+    
+    UserRole(String key) {
+        this.key = key;
+    }
+    
+    public String getKey() {
+        return key;
+    }
+}
+```
+
+**Role-Based Service Logic:**
+```java
+@Service
+@RequiredArgsConstructor
+public class AdminService {
+    
+    public void performAdminAction(UserEntity user) {
+        if (user.getUserRole() != UserRole.ADMIN) {
+            throw new AppException(ErrorCode.USER_ROLE_EXCEPTION);
+        }
+        
+        // Admin-only logic
+    }
+}
+```
+
+### ❌ NEVER DO - Authorization Violations
+
+1. **NEVER** implement authorization in controllers
+2. **NEVER** skip ownership validation
+3. **NEVER** trust client-side role claims
+4. **NEVER** use string literals for role checks
+5. **NEVER** bypass authorization for convenience
+6. **NEVER** expose unauthorized data
+
+## 🔍 MANDATORY SECURITY MONITORING
+
+### ✅ MUST DO - Security Logging
+
+**Authentication Event Logging:**
+```java
+@Component
+@RequiredArgsConstructor
+@Slf4j
+public class SecurityEventLogger {
+    
+    public void logSuccessfulLogin(UserEntity user, String clientIp) {
+        log.info("Successful login - User: {}, IP: {}", user.getEmail(), clientIp);
+    }
+    
+    public void logFailedLogin(String email, String clientIp, String reason) {
+        log.warn("Failed login attempt - Email: {}, IP: {}, Reason: {}", 
+            email, clientIp, reason);
+    }
+    
+    public void logTokenValidationFailure(String token, String reason) {
+        log.warn("Token validation failed - Token: {}, Reason: {}", 
+            maskToken(token), reason);
+    }
+    
+    private String maskToken(String token) {
+        if (token == null || token.length() < 10) {
+            return "***";
+        }
+        return token.substring(0, 5) + "..." + token.substring(token.length() - 5);
+    }
+}
+```
+
+### ✅ MUST DO - Rate Limiting
+
+**Login Attempt Rate Limiting:**
+```java
+@Component
+@RequiredArgsConstructor
+public class LoginAttemptService {
+    
+    private final RedisTemplate<String, String> redisTemplate;
+    
+    private static final int MAX_ATTEMPTS = 5;
+    private static final int LOCKOUT_DURATION = 15; // minutes
+    
+    public void recordFailedAttempt(String email) {
+        String key = "login_attempts:" + email;
+        String attempts = redisTemplate.opsForValue().get(key);
+        
+        int currentAttempts = attempts == null ? 0 : Integer.parseInt(attempts);
+        currentAttempts++;
+        
+        redisTemplate.opsForValue().set(key, String.valueOf(currentAttempts), 
+            Duration.ofMinutes(LOCKOUT_DURATION));
+        
+        if (currentAttempts >= MAX_ATTEMPTS) {
+            log.warn("User {} has been locked out due to too many failed login attempts", email);
+        }
+    }
+    
+    public boolean isBlocked(String email) {
+        String key = "login_attempts:" + email;
+        String attempts = redisTemplate.opsForValue().get(key);
+        
+        return attempts != null && Integer.parseInt(attempts) >= MAX_ATTEMPTS;
+    }
+}
+```
+
+### ❌ NEVER DO - Security Monitoring Violations
+
+1. **NEVER** log sensitive information (passwords, tokens)
+2. **NEVER** ignore security events
+3. **NEVER** skip rate limiting for authentication
+4. **NEVER** expose security metrics publicly
+5. **NEVER** ignore suspicious activity patterns
+
+## 🚨 CRITICAL SECURITY RULES
+
+### ✅ MUST DO - Security Checklist
+
+Before deploying security features, ensure:
+
+✅ All endpoints are properly authenticated
+✅ Authorization checks are implemented
+✅ Passwords are properly encrypted
+✅ JWT tokens are securely generated and validated
+✅ Sensitive data is not exposed in responses
+✅ CORS is properly configured
+✅ Rate limiting is implemented
+✅ Security events are logged
+✅ OAuth2 integration is secure
+✅ Token blacklisting works correctly
+
+### ❌ NEVER DO - Critical Security Violations
+
+1. **Authentication Bypass** - Never skip authentication checks
+2. **Authorization Bypass** - Never skip permission validation
+3. **Token Leakage** - Never expose tokens in logs or responses
+4. **Weak Encryption** - Never use weak or outdated algorithms
+5. **Privilege Escalation** - Never trust client-provided role claims
+6. **Data Exposure** - Never return sensitive data without authorization
+7. **Injection Attacks** - Never trust user input without validation
+8. **Session Fixation** - Never reuse authentication tokens
+
+## 🔐 SECURITY BEST PRACTICES
+
+### ✅ MUST DO - Production Security
+
+**Environment-Specific Configuration:**
+```yaml
+# application-prod.yml
+jwt:
+  secretKey: ${JWT_SECRET_KEY}  # Strong, random secret
+  accessExpiration: 900000      # 15 minutes
+  refreshExpiration: 1209600000 # 14 days
+
+spring:
+  datasource:
+    url: ${DB_URL}
+    username: ${DB_USERNAME}
+    password: ${DB_PASSWORD}
+```
+
+**Security Headers:**
+```java
+@Configuration
+public class SecurityHeadersConfig {
+    
+    @Bean
+    public FilterRegistrationBean<SecurityHeadersFilter> securityHeadersFilter() {
+        FilterRegistrationBean<SecurityHeadersFilter> registrationBean = 
+            new FilterRegistrationBean<>();
+        registrationBean.setFilter(new SecurityHeadersFilter());
+        registrationBean.addUrlPatterns("/*");
+        return registrationBean;
+    }
+}
+
+public class SecurityHeadersFilter implements Filter {
+    
+    @Override
+    public void doFilter(ServletRequest request, ServletResponse response, 
+                        FilterChain chain) throws IOException, ServletException {
+        
+        HttpServletResponse httpResponse = (HttpServletResponse) response;
+        httpResponse.setHeader("X-Content-Type-Options", "nosniff");
+        httpResponse.setHeader("X-Frame-Options", "DENY");
+        httpResponse.setHeader("X-XSS-Protection", "1; mode=block");
+        httpResponse.setHeader("Strict-Transport-Security", "max-age=31536000; includeSubDomains");
+        
+        chain.doFilter(request, response);
+    }
+}
+```
+
+### ❌ NEVER DO - Production Security Violations
+
+1. **NEVER** use default passwords or secrets
+2. **NEVER** disable security features for debugging
+3. **NEVER** expose internal ports or services
+4. **NEVER** skip security updates
+5. **NEVER** ignore security scan results
+6. **NEVER** use HTTP in production
+
+Remember: **Security is not optional**. Implement it from the start, review it regularly, and never compromise on security for convenience!

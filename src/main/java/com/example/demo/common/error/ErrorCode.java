@@ -30,8 +30,9 @@ public enum ErrorCode {
 	// Server
 	INTERNAL_SERVER_ERROR(HttpStatus.INTERNAL_SERVER_ERROR, "S-001", "Internal server error occurred."),
 	S3_SERVER_ERROR(HttpStatus.INTERNAL_SERVER_ERROR, "S-002", "S3 server error occurred."),
-	;
 
+	USER_EMAIL_DUPLICATED_EXCEPTION(HttpStatus.CONFLICT, "U-001", "이미 사용중인 이메일입니다."),
+	;
 	private final HttpStatus status;
 	private final String code;
 	private final String message;
