@@ -6,6 +6,8 @@ import com.example.demo.domain.article.entity.Article;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.FetchType;
+import jakarta.persistence.GeneratedValue;
+import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
@@ -23,6 +25,7 @@ import lombok.NoArgsConstructor;
 public class QuizQuestion extends BaseEntity {
 
 	@Id
+	@GeneratedValue(strategy = GenerationType.IDENTITY)
 	private Long id;
 
 	@ManyToOne(fetch = FetchType.LAZY)
@@ -35,9 +38,8 @@ public class QuizQuestion extends BaseEntity {
 	@Column(name = "correct_answer", nullable = false)
 	private Boolean correctAnswer;
 
-	public static QuizQuestion of(Long id, Article article, String question, Boolean correctAnswer) {
+	public static QuizQuestion of(Article article, String question, Boolean correctAnswer) {
 		return QuizQuestion.builder()
-			.id(id)
 			.article(article)
 			.question(question)
 			.correctAnswer(correctAnswer)

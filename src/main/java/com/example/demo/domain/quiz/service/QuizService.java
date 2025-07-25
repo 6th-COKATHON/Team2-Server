@@ -59,7 +59,7 @@ public class QuizService {
 		
 		// 새로운 퀴즈 문제들 저장
 		List<QuizQuestion> quizQuestions = request.questions().stream()
-			.map(dto -> QuizQuestion.of(dto.id(), article, dto.question(), dto.correctAnswer()))
+			.map(dto -> QuizQuestion.of(article, dto.question(), dto.correctAnswer()))
 			.collect(Collectors.toList());
 		
 		quizQuestionRepository.saveAll(quizQuestions);
