@@ -2,6 +2,7 @@ package com.example.demo.domain.auth.service;
 
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import com.example.demo.common.error.ErrorCode;
 import com.example.demo.common.error.exception.AppException;
@@ -27,6 +28,7 @@ public class AuthService {
 
 	private final JwtTokenProvider jwtTokenProvider;
 
+	@Transactional
 	public LoginResponse login(final String email, final String password) {
 		UserEntity user = userEntityRepository.findByEmail(email)
 			.orElseThrow(() -> new AppException(ErrorCode.USER_NOT_FOUND_EXCEPTION));
@@ -37,12 +39,8 @@ public class AuthService {
 
 		Token token = jwtTokenProvider.createToken(user);
 
-		RefreshToken refreshToken = RefreshToken.builder()
-			.userId(user.getId())
-			.refreshToken(token.refreshToken())
-			.build();
-
-		refreshTokenRepository.save(refreshToken);
+		// RefreshToken을 안전하게 저장하거나 업데이트
+		refreshTokenRepository.saveOrUpdateByUserId(user.getId(), token.refreshToken());
 
 		return LoginResponse.from(token);
 	}
