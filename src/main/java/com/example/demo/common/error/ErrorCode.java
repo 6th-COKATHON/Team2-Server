@@ -35,7 +35,10 @@ public enum ErrorCode {
 	USER_EMAIL_DUPLICATED_EXCEPTION(HttpStatus.CONFLICT, "U-001", "이미 사용중인 이메일입니다."),
 	USER_NOT_FOUND_EXCEPTION(HttpStatus.NOT_FOUND, "U-002", "해당 유저를 찾을 수 없습니다."),
 	USER_PASSWORD_MISMATCH_EXCEPTION(HttpStatus.UNAUTHORIZED, "U-003", "비밀번호가 일치하지 않습니다."),
-	;
+
+
+	NOT_FOUND_EXCEPTION(HttpStatus.NOT_FOUND,"N-000", "해당 리소스를 찾을 수 없습니다."),
+	BAD_REQUEST_EXCEPTION(HttpStatus.BAD_REQUEST, "N-001", "잘못된 요청입니다."),;
 	private final HttpStatus status;
 	private final String code;
 	private final String message;
