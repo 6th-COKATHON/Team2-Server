@@ -107,6 +107,20 @@ public class QuizService {
 		return QuizGradingResponse.of(request.articleId(), results);
 	}
 	
+	/**
+	 * 특정 기사의 퀴즈 실제 정답 데이터를 반환합니다.
+	 */
+	public QuizGradingResponse getQuizAnswers(Long articleId) {
+		List<QuizQuestion> quizQuestions = quizQuestionRepository.findByArticleId(articleId);
+		if (quizQuestions.isEmpty()) {
+			throw new AppException(ErrorCode.NOT_FOUND_EXCEPTION);
+		}
+		List<QuizResultDto> results = quizQuestions.stream()
+			.map(q -> QuizResultDto.of(q.getId(), q.getCorrectAnswer()))
+			.collect(Collectors.toList());
+		return QuizGradingResponse.of(articleId, results);
+	}
+	
 	private QuizResultDto gradeAnswer(QuizAnswerDto answer, Map<Long, Boolean> correctAnswers) {
 		Boolean correctAnswer = correctAnswers.get(answer.id());
 		

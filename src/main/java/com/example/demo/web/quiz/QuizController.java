@@ -72,16 +72,15 @@ public class QuizController {
 	}
 	
 	@PostMapping("/grade")
-	@Operation(summary = "퀴즈 채점", description = "사용자의 퀴즈 답안을 채점합니다.")
+	@Operation(summary = "퀴즈 정답 조회", description = "특정 기사 퀴즈의 실제 정답 데이터를 내려줍니다.")
 	@ApiResponses(value = {
-		@ApiResponse(responseCode = "200", description = "채점 완료"),
-		@ApiResponse(responseCode = "400", description = "잘못된 요청 (존재하지 않는 문제 ID 등)"),
+		@ApiResponse(responseCode = "200", description = "정답 데이터 반환 완료"),
 		@ApiResponse(responseCode = "404", description = "해당 기사의 퀴즈를 찾을 수 없음")
 	})
-	public ResponseEntity<AppResponse<QuizGradingResponse>> gradeQuiz(
+	public ResponseEntity<AppResponse<QuizGradingResponse>> getQuizAnswers(
 		@RequestBody QuizGradingRequest request) {
-		
-		QuizGradingResponse response = quizService.gradeQuiz(request);
+		// 실제 정답 데이터 반환
+		QuizGradingResponse response = quizService.getQuizAnswers(request.articleId());
 		return ResponseEntity.ok(AppResponse.ok(response));
 	}
 } 
