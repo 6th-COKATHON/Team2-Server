@@ -5,12 +5,14 @@ import org.springframework.context.annotation.Configuration;
 
 import com.example.demo.common.property.CorsProperties;
 import com.example.demo.common.property.SwaggerProperties;
+import com.example.demo.common.property.TokenProperty;
 
 // Global properties configuration
 @Configuration
 @EnableConfigurationProperties(value = {
 	CorsProperties.class,
-	SwaggerProperties.class
+	SwaggerProperties.class,
+	TokenProperty.class
 })
 public class PropertyConfig {
 }

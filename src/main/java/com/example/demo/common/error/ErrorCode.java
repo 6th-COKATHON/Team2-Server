@@ -31,7 +31,10 @@ public enum ErrorCode {
 	INTERNAL_SERVER_ERROR(HttpStatus.INTERNAL_SERVER_ERROR, "S-001", "Internal server error occurred."),
 	S3_SERVER_ERROR(HttpStatus.INTERNAL_SERVER_ERROR, "S-002", "S3 server error occurred."),
 
+	// User
 	USER_EMAIL_DUPLICATED_EXCEPTION(HttpStatus.CONFLICT, "U-001", "이미 사용중인 이메일입니다."),
+	USER_NOT_FOUND_EXCEPTION(HttpStatus.NOT_FOUND, "U-002", "해당 유저를 찾을 수 없습니다."),
+	USER_PASSWORD_MISMATCH_EXCEPTION(HttpStatus.UNAUTHORIZED, "U-003", "비밀번호가 일치하지 않습니다."),
 	;
 	private final HttpStatus status;
 	private final String code;
