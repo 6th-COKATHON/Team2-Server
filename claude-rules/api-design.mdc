@@ -1,0 +1,1056 @@
+---
+alwaysApply: true
+---
+
+# API Design & Response Standards
+
+## 🌐 MANDATORY API DESIGN PRINCIPLES
+
+### ✅ MUST DO - RESTful API Design
+
+**URL Structure:**
+```
+/api/[resource]                    # Collection
+/api/[resource]/{id}               # Single resource
+/api/[resource]/{id}/[sub-resource] # Sub-resource
+```
+
+**HTTP Methods:**
+- **GET**: Retrieve data (idempotent)
+- **POST**: Create new resource
+- **PUT**: Update entire resource (idempotent)
+- **PATCH**: Partial update
+- **DELETE**: Remove resource (idempotent)
+
+**Examples:**
+```java
+@RestController
+@RequestMapping("/api/users")
+public class UserController {
+    
+    @GetMapping                    // GET /api/users
+    public ResponseEntity<AppResponse<PageResponse<UserResponse>>> getUsers() { }
+    
+    @GetMapping("/{id}")           // GET /api/users/1
+    public ResponseEntity<AppResponse<UserResponse>> getUser(@PathVariable Long id) { }
+    
+    @PostMapping                   // POST /api/users
+    public ResponseEntity<AppResponse<UserCreateResponse>> createUser(@Valid @RequestBody UserCreateRequest request) { }
+    
+    @PutMapping("/{id}")           // PUT /api/users/1
+    public ResponseEntity<AppResponse<UserUpdateResponse>> updateUser(@PathVariable Long id, @Valid @RequestBody UserUpdateRequest request) { }
+    
+    @DeleteMapping("/{id}")        // DELETE /api/users/1
+    public ResponseEntity<AppResponse<Void>> deleteUser(@PathVariable Long id) { }
+}
+```
+
+### ✅ MUST DO - HTTP Status Codes
+
+**Standard Status Codes:**
+- **200 OK**: Successful GET, PUT, PATCH
+- **201 Created**: Successful POST
+- **204 No Content**: Successful DELETE
+- **400 Bad Request**: Invalid request data
+- **401 Unauthorized**: Authentication required
+- **403 Forbidden**: Access denied
+- **404 Not Found**: Resource not found
+- **409 Conflict**: Resource conflict (e.g., duplicate email)
+- **422 Unprocessable Entity**: Validation failed
+- **500 Internal Server Error**: Server error
+
+### ❌ NEVER DO - API Design Violations
+
+1. **NEVER** use verbs in URL paths (`/api/users/create` ❌)
+2. **NEVER** ignore HTTP method semantics
+3. **NEVER** return different response formats for same endpoint
+4. **NEVER** use non-standard HTTP status codes
+5. **NEVER** expose internal implementation details in URLs
+6. **NEVER** break REST principles for convenience
+
+## 📝 MANDATORY REQUEST/RESPONSE PATTERNS
+
+### ✅ MUST DO - Request DTOs
+
+**Request Validation:**
+```java
+public record UserCreateRequest(
+    @Email(message = "이메일 형식으로 요청해주세요.")
+    @NotBlank(message = "이메일은 필수입니다.")
+    String email,
+    
+    @NotBlank(message = "이름은 필수입니다.")
+    @Length(min = 2, max = 20, message = "이름은 2자 이상 20자 이하로 입력해주세요.")
+    String name,
+    
+    @Password(message = "비밀번호는 8자 이상 20자 이하, 영문, 숫자, 특수문자를 포함해야 합니다.")
+    String password
+) {
+    // Add static factory methods if needed
+    public static UserCreateRequest of(String email, String name, String password) {
+        return new UserCreateRequest(email, name, password);
+    }
+}
+```
+
+**Complex Request with Nested Objects:**
+```java
+public record PostCreateRequest(
+    @NotBlank(message = "제목은 필수입니다.")
+    @Length(max = 100, message = "제목은 100자 이하로 입력해주세요.")
+    String title,
+    
+    @NotBlank(message = "내용은 필수입니다.")
+    @Length(max = 1000, message = "내용은 1000자 이하로 입력해주세요.")
+    String content,
+    
+    @Valid
+    @NotNull(message = "가격 정보는 필수입니다.")
+    PriceRequest price,
+    
+    @Valid
+    @NotEmpty(message = "이미지는 최소 1개 이상 필요합니다.")
+    @Size(max = 8, message = "이미지는 최대 8개까지 업로드 가능합니다.")
+    List<Long> imageIds
+) {
+    
+    public record PriceRequest(
+        @NotNull(message = "원가는 필수입니다.")
+        @Positive(message = "원가는 양수여야 합니다.")
+        Long originalPrice,
+        
+        @NotNull(message = "할인가는 필수입니다.")
+        @Positive(message = "할인가는 양수여야 합니다.")
+        Long discountPrice
+    ) {}
+}
+```
+
+### ✅ MUST DO - Response DTOs
+
+**Standard Response Wrapper:**
+```java
+// Success Response
+@JsonInclude(JsonInclude.Include.NON_NULL)
+public class AppResponse<T> extends BaseResponse {
+    private final T data;
+    
+    private AppResponse(HttpStatusCode status, T data) {
+        super(true, status);
+        this.data = data;
+    }
+    
+    public static <T> AppResponse<T> ok(T data) {
+        return new AppResponse<>(HttpStatus.OK, data);
+    }
+    
+    public static <T> AppResponse<T> created(T data) {
+        return new AppResponse<>(HttpStatus.CREATED, data);
+    }
+}
+```
+
+**Response DTO Pattern:**
+```java
+public record UserCreateResponse(
+    Long id,
+    String email,
+    String name,
+    LocalDateTime createdAt
+) {
+    public static UserCreateResponse from(UserEntity user) {
+        return new UserCreateResponse(
+            user.getId(),
+            user.getEmail(),
+            user.getName(),
+            user.getCreateAt()
+        );
+    }
+}
+```
+
+**Paginated Response:**
+```java
+public record PageResponse<T>(
+    List<T> content,
+    int page,
+    int size,
+    long totalElements,
+    int totalPages,
+    boolean first,
+    boolean last
+) {
+    public static <T> PageResponse<T> of(Page<T> page) {
+        return new PageResponse<>(
+            page.getContent(),
+            page.getNumber(),
+            page.getSize(),
+            page.getTotalElements(),
+            page.getTotalPages(),
+            page.isFirst(),
+            page.isLast()
+        );
+    }
+}
+```
+
+### ❌ NEVER DO - Request/Response Violations
+
+1. **NEVER** use entities directly as request/response objects
+2. **NEVER** expose internal field names in APIs
+3. **NEVER** return inconsistent response formats
+4. **NEVER** ignore validation on request objects
+5. **NEVER** include sensitive data in responses
+6. **NEVER** use different date formats in same API
+
+## 🚨 MANDATORY ERROR HANDLING
+
+### ✅ MUST DO - Error Response Format
+
+**Standard Error Response:**
+```java
+@JsonInclude(JsonInclude.Include.NON_NULL)
+public class ErrorResponse extends BaseResponse {
+    private final String code;
+    private final String message;
+    private final List<String> reason;
+    
+    private ErrorResponse(ErrorCode errorCode, List<String> reason) {
+        super(false, errorCode.getStatus());
+        this.code = errorCode.getCode();
+        this.message = errorCode.getMessage();
+        this.reason = reason;
+    }
+    
+    public static ErrorResponse of(ErrorCode errorCode) {
+        return new ErrorResponse(errorCode, null);
+    }
+    
+    public static ErrorResponse of(ErrorCode errorCode, List<String> reason) {
+        return new ErrorResponse(errorCode, reason);
+    }
+}
+```
+
+**Global Exception Handler:**
+```java
+@RestControllerAdvice
+@Slf4j
+public class GlobalExceptionHandler {
+    
+    @ExceptionHandler(AppException.class)
+    public ResponseEntity<ErrorResponse> handleAppException(AppException e) {
+        log.warn("Application exception occurred: {}", e.getMessage());
+        return ResponseEntity
+            .status(e.getErrorCode().getStatus())
+            .body(ErrorResponse.of(e.getErrorCode()));
+    }
+    
+    @ExceptionHandler(MethodArgumentNotValidException.class)
+    public ResponseEntity<ErrorResponse> handleValidationException(MethodArgumentNotValidException e) {
+        List<String> errors = e.getBindingResult()
+            .getFieldErrors()
+            .stream()
+            .map(FieldError::getDefaultMessage)
+            .collect(Collectors.toList());
+            
+        return ResponseEntity
+            .status(HttpStatus.BAD_REQUEST)
+            .body(ErrorResponse.of(ErrorCode.USER_INPUT_EXCEPTION, errors));
+    }
+    
+    @ExceptionHandler(Exception.class)
+    public ResponseEntity<ErrorResponse> handleGeneralException(Exception e) {
+        log.error("Unexpected error occurred", e);
+        return ResponseEntity
+            .status(HttpStatus.INTERNAL_SERVER_ERROR)
+            .body(ErrorResponse.of(ErrorCode.INTERNAL_SERVER_ERROR));
+    }
+}
+```
+
+### ✅ MUST DO - Error Code System
+
+**Error Code Pattern:**
+```java
+public enum ErrorCode {
+    // Common (C-xxx)
+    USER_INPUT_EXCEPTION(HttpStatus.BAD_REQUEST, "C-001", "사용자 입력 오류"),
+    AUTHENTICATION_EXCEPTION(HttpStatus.UNAUTHORIZED, "C-003", "인증 오류"),
+    
+    // User Domain (U-xxx)
+    USER_NOT_FOUND_EXCEPTION(HttpStatus.NOT_FOUND, "U-002", "해당 유저를 찾을 수 없습니다."),
+    USER_EMAIL_DUPLICATED_EXCEPTION(HttpStatus.CONFLICT, "U-001", "이미 사용중인 이메일입니다."),
+    
+    // Post Domain (P-xxx)
+    POST_NOT_FOUND_EXCEPTION(HttpStatus.NOT_FOUND, "P-001", "해당 포스트를 찾을 수 없습니다."),
+    POST_ROLE_EXCEPTION(HttpStatus.FORBIDDEN, "P-002", "포스트에 대한 권한이 없습니다.");
+    
+    private final HttpStatus status;
+    private final String code;
+    private final String message;
+}
+```
+
+### ❌ NEVER DO - Error Handling Violations
+
+1. **NEVER** return stack traces in production responses
+2. **NEVER** use generic error messages
+3. **NEVER** ignore exception logging
+4. **NEVER** return different error formats
+5. **NEVER** expose internal system information
+6. **NEVER** use English in user-facing error messages
+
+## 📖 MANDATORY API DOCUMENTATION
+
+### ✅ MUST DO - Swagger Documentation
+
+**Controller Documentation:**
+```java
+@RestController
+@RequestMapping("/api/users")
+@Tag(name = "사용자 관리", description = "사용자 관련 API")
+public class UserController {
+    
+    @PostMapping
+    @Operation(
+        summary = "회원가입",
+        description = "이메일, 비밀번호, 이름을 입력하여 새로운 사용자를 생성합니다."
+    )
+    @ApiResponses({
+        @ApiResponse(
+            responseCode = "201",
+            description = "회원가입 성공",
+            content = @Content(schema = @Schema(implementation = UserCreateResponse.class))
+        ),
+        @ApiResponse(
+            responseCode = "400",
+            description = "잘못된 요청 데이터",
+            content = @Content(schema = @Schema(implementation = ErrorResponse.class))
+        ),
+        @ApiResponse(
+            responseCode = "409",
+            description = "이미 사용중인 이메일",
+            content = @Content(schema = @Schema(implementation = ErrorResponse.class))
+        )
+    })
+    public ResponseEntity<AppResponse<UserCreateResponse>> createUser(
+        @Parameter(description = "사용자 생성 요청 정보", required = true)
+        @Valid @RequestBody UserCreateRequest request) {
+        
+        return ResponseEntity.status(HttpStatus.CREATED)
+            .body(AppResponse.created(userService.createUser(request)));
+    }
+}
+```
+
+**DTO Documentation:**
+```java
+@Schema(description = "사용자 생성 요청")
+public record UserCreateRequest(
+    @Schema(description = "이메일 주소", example = "user@example.com")
+    @Email(message = "이메일 형식으로 요청해주세요.")
+    @NotBlank(message = "이메일은 필수입니다.")
+    String email,
+    
+    @Schema(description = "사용자 이름", example = "홍길동")
+    @NotBlank(message = "이름은 필수입니다.")
+    @Length(min = 2, max = 20, message = "이름은 2자 이상 20자 이하로 입력해주세요.")
+    String name,
+    
+    @Schema(description = "비밀번호", example = "password123!")
+    @Password(message = "비밀번호는 8자 이상 20자 이하, 영문, 숫자, 특수문자를 포함해야 합니다.")
+    String password
+) {}
+```
+
+### ❌ NEVER DO - Documentation Violations
+
+1. **NEVER** leave APIs without documentation
+2. **NEVER** use English in Korean service descriptions
+3. **NEVER** forget to update documentation when changing APIs
+4. **NEVER** include internal implementation details
+5. **NEVER** use meaningless examples in documentation
+
+## 🔐 MANDATORY SECURITY PATTERNS
+
+### ✅ MUST DO - Authentication & Authorization
+
+**Authentication Annotation:**
+```java
+@GetMapping("/me")
+@Operation(summary = "현재 사용자 정보 조회")
+public ResponseEntity<AppResponse<UserInfoResponse>> getCurrentUser(
+    @Parameter(hidden = true) @CurrentUser UserEntity user) {
+    
+    return ResponseEntity.ok(AppResponse.ok(userService.getUserInfo(user)));
+}
+```
+
+**Authorization Checks:**
+```java
+@DeleteMapping("/{id}")
+@Operation(summary = "게시물 삭제")
+public ResponseEntity<AppResponse<Void>> deletePost(
+    @PathVariable Long id,
+    @CurrentUser UserEntity user) {
+    
+    // Business logic handles authorization
+    postService.deletePost(id, user);
+    
+    return ResponseEntity.ok(AppResponse.noContent());
+}
+```
+
+### ✅ MUST DO - Input Validation
+
+**Request Body Validation:**
+```java
+@PostMapping
+public ResponseEntity<AppResponse<PostCreateResponse>> createPost(
+    @Valid @RequestBody PostCreateRequest request,  // Always use @Valid
+    @CurrentUser UserEntity user) {
+    
+    return ResponseEntity.status(HttpStatus.CREATED)
+        .body(AppResponse.created(postService.createPost(request, user)));
+}
+```
+
+**Path Variable Validation:**
+```java
+@GetMapping("/{id}")
+public ResponseEntity<AppResponse<PostResponse>> getPost(
+    @PathVariable @Positive(message = "게시물 ID는 양수여야 합니다.") Long id) {
+    
+    return ResponseEntity.ok(AppResponse.ok(postService.getPost(id)));
+}
+```
+
+### ❌ NEVER DO - Security Violations
+
+1. **NEVER** skip input validation
+2. **NEVER** trust client-provided data
+3. **NEVER** expose sensitive information in responses
+4. **NEVER** implement authorization in controllers
+5. **NEVER** log sensitive data
+6. **NEVER** use HTTP for sensitive operations
+
+## 🔄 MANDATORY API VERSIONING
+
+### ✅ MUST DO - API Version Management
+
+**URL Path Versioning:**
+```java
+@RestController
+@RequestMapping("/api/v1/users")  // Version in URL path
+public class UserControllerV1 {
+    // Implementation
+}
+
+@RestController
+@RequestMapping("/api/v2/users")
+public class UserControllerV2 {
+    // Implementation
+}
+```
+
+**Deprecation Handling:**
+```java
+@GetMapping("/deprecated-endpoint")
+@Operation(summary = "구버전 API", deprecated = true)
+@Deprecated
+public ResponseEntity<AppResponse<OldResponse>> oldEndpoint() {
+    log.warn("Deprecated API called: /api/v1/users/deprecated-endpoint");
+    // Implementation
+}
+```
+
+### ❌ NEVER DO - Versioning Violations
+
+1. **NEVER** break backward compatibility without notice
+2. **NEVER** remove APIs without deprecation period
+3. **NEVER** change response formats in same version
+4. **NEVER** ignore version management
+5. **NEVER** mix different versioning strategies
+
+## 🚨 CRITICAL API QUALITY RULES
+
+### ✅ MUST DO - API Quality Checklist
+
+Before deploying APIs, ensure:
+
+✅ All endpoints have proper HTTP methods
+✅ Response formats are consistent
+✅ Error handling is comprehensive
+✅ Input validation is complete
+✅ Authentication/authorization is implemented
+✅ API documentation is up-to-date
+✅ Performance is acceptable
+✅ Security is verified
+
+### ❌ NEVER DO - Critical API Violations
+
+1. **Inconsistent Response Formats** - Always use standard wrappers
+2. **Missing Error Handling** - Every endpoint must handle errors
+3. **Poor Performance** - APIs must respond within 2 seconds
+4. **Security Gaps** - Never skip authentication/authorization
+5. **Undocumented Changes** - Always update documentation
+6. **Breaking Changes** - Never break existing integrations
+
+## 📊 PERFORMANCE REQUIREMENTS
+
+### ✅ MUST DO - Performance Standards
+
+**Response Time Limits:**
+- **Simple GET requests**: < 200ms
+- **Complex queries**: < 1000ms
+- **Create/Update operations**: < 2000ms
+- **File uploads**: < 5000ms
+
+**Pagination Requirements:**
+```java
+@GetMapping
+public ResponseEntity<AppResponse<PageResponse<PostResponse>>> getPosts(
+    @RequestParam(defaultValue = "0") @Min(0) int page,
+    @RequestParam(defaultValue = "10") @Min(1) @Max(100) int size,
+    @RequestParam(defaultValue = "createdAt") String sort) {
+    
+    return ResponseEntity.ok(AppResponse.ok(postService.getPosts(page, size, sort)));
+}
+```
+
+### ❌ NEVER DO - Performance Violations
+
+1. **NEVER** return unbounded result sets
+2. **NEVER** ignore database query optimization
+3. **NEVER** perform heavy operations in controllers
+4. **NEVER** skip caching for expensive operations
+5. **NEVER** ignore memory usage in large responses
+
+Remember: **APIs are contracts**. Design them carefully, document them thoroughly, and maintain them religiously!
+# API Design & Response Standards
+
+## 🌐 MANDATORY API DESIGN PRINCIPLES
+
+### ✅ MUST DO - RESTful API Design
+
+**URL Structure:**
+```
+/api/[resource]                    # Collection
+/api/[resource]/{id}               # Single resource
+/api/[resource]/{id}/[sub-resource] # Sub-resource
+```
+
+**HTTP Methods:**
+- **GET**: Retrieve data (idempotent)
+- **POST**: Create new resource
+- **PUT**: Update entire resource (idempotent)
+- **PATCH**: Partial update
+- **DELETE**: Remove resource (idempotent)
+
+**Examples:**
+```java
+@RestController
+@RequestMapping("/api/users")
+public class UserController {
+    
+    @GetMapping                    // GET /api/users
+    public ResponseEntity<AppResponse<PageResponse<UserResponse>>> getUsers() { }
+    
+    @GetMapping("/{id}")           // GET /api/users/1
+    public ResponseEntity<AppResponse<UserResponse>> getUser(@PathVariable Long id) { }
+    
+    @PostMapping                   // POST /api/users
+    public ResponseEntity<AppResponse<UserCreateResponse>> createUser(@Valid @RequestBody UserCreateRequest request) { }
+    
+    @PutMapping("/{id}")           // PUT /api/users/1
+    public ResponseEntity<AppResponse<UserUpdateResponse>> updateUser(@PathVariable Long id, @Valid @RequestBody UserUpdateRequest request) { }
+    
+    @DeleteMapping("/{id}")        // DELETE /api/users/1
+    public ResponseEntity<AppResponse<Void>> deleteUser(@PathVariable Long id) { }
+}
+```
+
+### ✅ MUST DO - HTTP Status Codes
+
+**Standard Status Codes:**
+- **200 OK**: Successful GET, PUT, PATCH
+- **201 Created**: Successful POST
+- **204 No Content**: Successful DELETE
+- **400 Bad Request**: Invalid request data
+- **401 Unauthorized**: Authentication required
+- **403 Forbidden**: Access denied
+- **404 Not Found**: Resource not found
+- **409 Conflict**: Resource conflict (e.g., duplicate email)
+- **422 Unprocessable Entity**: Validation failed
+- **500 Internal Server Error**: Server error
+
+### ❌ NEVER DO - API Design Violations
+
+1. **NEVER** use verbs in URL paths (`/api/users/create` ❌)
+2. **NEVER** ignore HTTP method semantics
+3. **NEVER** return different response formats for same endpoint
+4. **NEVER** use non-standard HTTP status codes
+5. **NEVER** expose internal implementation details in URLs
+6. **NEVER** break REST principles for convenience
+
+## 📝 MANDATORY REQUEST/RESPONSE PATTERNS
+
+### ✅ MUST DO - Request DTOs
+
+**Request Validation:**
+```java
+public record UserCreateRequest(
+    @Email(message = "이메일 형식으로 요청해주세요.")
+    @NotBlank(message = "이메일은 필수입니다.")
+    String email,
+    
+    @NotBlank(message = "이름은 필수입니다.")
+    @Length(min = 2, max = 20, message = "이름은 2자 이상 20자 이하로 입력해주세요.")
+    String name,
+    
+    @Password(message = "비밀번호는 8자 이상 20자 이하, 영문, 숫자, 특수문자를 포함해야 합니다.")
+    String password
+) {
+    // Add static factory methods if needed
+    public static UserCreateRequest of(String email, String name, String password) {
+        return new UserCreateRequest(email, name, password);
+    }
+}
+```
+
+**Complex Request with Nested Objects:**
+```java
+public record PostCreateRequest(
+    @NotBlank(message = "제목은 필수입니다.")
+    @Length(max = 100, message = "제목은 100자 이하로 입력해주세요.")
+    String title,
+    
+    @NotBlank(message = "내용은 필수입니다.")
+    @Length(max = 1000, message = "내용은 1000자 이하로 입력해주세요.")
+    String content,
+    
+    @Valid
+    @NotNull(message = "가격 정보는 필수입니다.")
+    PriceRequest price,
+    
+    @Valid
+    @NotEmpty(message = "이미지는 최소 1개 이상 필요합니다.")
+    @Size(max = 8, message = "이미지는 최대 8개까지 업로드 가능합니다.")
+    List<Long> imageIds
+) {
+    
+    public record PriceRequest(
+        @NotNull(message = "원가는 필수입니다.")
+        @Positive(message = "원가는 양수여야 합니다.")
+        Long originalPrice,
+        
+        @NotNull(message = "할인가는 필수입니다.")
+        @Positive(message = "할인가는 양수여야 합니다.")
+        Long discountPrice
+    ) {}
+}
+```
+
+### ✅ MUST DO - Response DTOs
+
+**Standard Response Wrapper:**
+```java
+// Success Response
+@JsonInclude(JsonInclude.Include.NON_NULL)
+public class AppResponse<T> extends BaseResponse {
+    private final T data;
+    
+    private AppResponse(HttpStatusCode status, T data) {
+        super(true, status);
+        this.data = data;
+    }
+    
+    public static <T> AppResponse<T> ok(T data) {
+        return new AppResponse<>(HttpStatus.OK, data);
+    }
+    
+    public static <T> AppResponse<T> created(T data) {
+        return new AppResponse<>(HttpStatus.CREATED, data);
+    }
+}
+```
+
+**Response DTO Pattern:**
+```java
+public record UserCreateResponse(
+    Long id,
+    String email,
+    String name,
+    LocalDateTime createdAt
+) {
+    public static UserCreateResponse from(UserEntity user) {
+        return new UserCreateResponse(
+            user.getId(),
+            user.getEmail(),
+            user.getName(),
+            user.getCreateAt()
+        );
+    }
+}
+```
+
+**Paginated Response:**
+```java
+public record PageResponse<T>(
+    List<T> content,
+    int page,
+    int size,
+    long totalElements,
+    int totalPages,
+    boolean first,
+    boolean last
+) {
+    public static <T> PageResponse<T> of(Page<T> page) {
+        return new PageResponse<>(
+            page.getContent(),
+            page.getNumber(),
+            page.getSize(),
+            page.getTotalElements(),
+            page.getTotalPages(),
+            page.isFirst(),
+            page.isLast()
+        );
+    }
+}
+```
+
+### ❌ NEVER DO - Request/Response Violations
+
+1. **NEVER** use entities directly as request/response objects
+2. **NEVER** expose internal field names in APIs
+3. **NEVER** return inconsistent response formats
+4. **NEVER** ignore validation on request objects
+5. **NEVER** include sensitive data in responses
+6. **NEVER** use different date formats in same API
+
+## 🚨 MANDATORY ERROR HANDLING
+
+### ✅ MUST DO - Error Response Format
+
+**Standard Error Response:**
+```java
+@JsonInclude(JsonInclude.Include.NON_NULL)
+public class ErrorResponse extends BaseResponse {
+    private final String code;
+    private final String message;
+    private final List<String> reason;
+    
+    private ErrorResponse(ErrorCode errorCode, List<String> reason) {
+        super(false, errorCode.getStatus());
+        this.code = errorCode.getCode();
+        this.message = errorCode.getMessage();
+        this.reason = reason;
+    }
+    
+    public static ErrorResponse of(ErrorCode errorCode) {
+        return new ErrorResponse(errorCode, null);
+    }
+    
+    public static ErrorResponse of(ErrorCode errorCode, List<String> reason) {
+        return new ErrorResponse(errorCode, reason);
+    }
+}
+```
+
+**Global Exception Handler:**
+```java
+@RestControllerAdvice
+@Slf4j
+public class GlobalExceptionHandler {
+    
+    @ExceptionHandler(AppException.class)
+    public ResponseEntity<ErrorResponse> handleAppException(AppException e) {
+        log.warn("Application exception occurred: {}", e.getMessage());
+        return ResponseEntity
+            .status(e.getErrorCode().getStatus())
+            .body(ErrorResponse.of(e.getErrorCode()));
+    }
+    
+    @ExceptionHandler(MethodArgumentNotValidException.class)
+    public ResponseEntity<ErrorResponse> handleValidationException(MethodArgumentNotValidException e) {
+        List<String> errors = e.getBindingResult()
+            .getFieldErrors()
+            .stream()
+            .map(FieldError::getDefaultMessage)
+            .collect(Collectors.toList());
+            
+        return ResponseEntity
+            .status(HttpStatus.BAD_REQUEST)
+            .body(ErrorResponse.of(ErrorCode.USER_INPUT_EXCEPTION, errors));
+    }
+    
+    @ExceptionHandler(Exception.class)
+    public ResponseEntity<ErrorResponse> handleGeneralException(Exception e) {
+        log.error("Unexpected error occurred", e);
+        return ResponseEntity
+            .status(HttpStatus.INTERNAL_SERVER_ERROR)
+            .body(ErrorResponse.of(ErrorCode.INTERNAL_SERVER_ERROR));
+    }
+}
+```
+
+### ✅ MUST DO - Error Code System
+
+**Error Code Pattern:**
+```java
+public enum ErrorCode {
+    // Common (C-xxx)
+    USER_INPUT_EXCEPTION(HttpStatus.BAD_REQUEST, "C-001", "사용자 입력 오류"),
+    AUTHENTICATION_EXCEPTION(HttpStatus.UNAUTHORIZED, "C-003", "인증 오류"),
+    
+    // User Domain (U-xxx)
+    USER_NOT_FOUND_EXCEPTION(HttpStatus.NOT_FOUND, "U-002", "해당 유저를 찾을 수 없습니다."),
+    USER_EMAIL_DUPLICATED_EXCEPTION(HttpStatus.CONFLICT, "U-001", "이미 사용중인 이메일입니다."),
+    
+    // Post Domain (P-xxx)
+    POST_NOT_FOUND_EXCEPTION(HttpStatus.NOT_FOUND, "P-001", "해당 포스트를 찾을 수 없습니다."),
+    POST_ROLE_EXCEPTION(HttpStatus.FORBIDDEN, "P-002", "포스트에 대한 권한이 없습니다.");
+    
+    private final HttpStatus status;
+    private final String code;
+    private final String message;
+}
+```
+
+### ❌ NEVER DO - Error Handling Violations
+
+1. **NEVER** return stack traces in production responses
+2. **NEVER** use generic error messages
+3. **NEVER** ignore exception logging
+4. **NEVER** return different error formats
+5. **NEVER** expose internal system information
+6. **NEVER** use English in user-facing error messages
+
+## 📖 MANDATORY API DOCUMENTATION
+
+### ✅ MUST DO - Swagger Documentation
+
+**Controller Documentation:**
+```java
+@RestController
+@RequestMapping("/api/users")
+@Tag(name = "사용자 관리", description = "사용자 관련 API")
+public class UserController {
+    
+    @PostMapping
+    @Operation(
+        summary = "회원가입",
+        description = "이메일, 비밀번호, 이름을 입력하여 새로운 사용자를 생성합니다."
+    )
+    @ApiResponses({
+        @ApiResponse(
+            responseCode = "201",
+            description = "회원가입 성공",
+            content = @Content(schema = @Schema(implementation = UserCreateResponse.class))
+        ),
+        @ApiResponse(
+            responseCode = "400",
+            description = "잘못된 요청 데이터",
+            content = @Content(schema = @Schema(implementation = ErrorResponse.class))
+        ),
+        @ApiResponse(
+            responseCode = "409",
+            description = "이미 사용중인 이메일",
+            content = @Content(schema = @Schema(implementation = ErrorResponse.class))
+        )
+    })
+    public ResponseEntity<AppResponse<UserCreateResponse>> createUser(
+        @Parameter(description = "사용자 생성 요청 정보", required = true)
+        @Valid @RequestBody UserCreateRequest request) {
+        
+        return ResponseEntity.status(HttpStatus.CREATED)
+            .body(AppResponse.created(userService.createUser(request)));
+    }
+}
+```
+
+**DTO Documentation:**
+```java
+@Schema(description = "사용자 생성 요청")
+public record UserCreateRequest(
+    @Schema(description = "이메일 주소", example = "user@example.com")
+    @Email(message = "이메일 형식으로 요청해주세요.")
+    @NotBlank(message = "이메일은 필수입니다.")
+    String email,
+    
+    @Schema(description = "사용자 이름", example = "홍길동")
+    @NotBlank(message = "이름은 필수입니다.")
+    @Length(min = 2, max = 20, message = "이름은 2자 이상 20자 이하로 입력해주세요.")
+    String name,
+    
+    @Schema(description = "비밀번호", example = "password123!")
+    @Password(message = "비밀번호는 8자 이상 20자 이하, 영문, 숫자, 특수문자를 포함해야 합니다.")
+    String password
+) {}
+```
+
+### ❌ NEVER DO - Documentation Violations
+
+1. **NEVER** leave APIs without documentation
+2. **NEVER** use English in Korean service descriptions
+3. **NEVER** forget to update documentation when changing APIs
+4. **NEVER** include internal implementation details
+5. **NEVER** use meaningless examples in documentation
+
+## 🔐 MANDATORY SECURITY PATTERNS
+
+### ✅ MUST DO - Authentication & Authorization
+
+**Authentication Annotation:**
+```java
+@GetMapping("/me")
+@Operation(summary = "현재 사용자 정보 조회")
+public ResponseEntity<AppResponse<UserInfoResponse>> getCurrentUser(
+    @Parameter(hidden = true) @CurrentUser UserEntity user) {
+    
+    return ResponseEntity.ok(AppResponse.ok(userService.getUserInfo(user)));
+}
+```
+
+**Authorization Checks:**
+```java
+@DeleteMapping("/{id}")
+@Operation(summary = "게시물 삭제")
+public ResponseEntity<AppResponse<Void>> deletePost(
+    @PathVariable Long id,
+    @CurrentUser UserEntity user) {
+    
+    // Business logic handles authorization
+    postService.deletePost(id, user);
+    
+    return ResponseEntity.ok(AppResponse.noContent());
+}
+```
+
+### ✅ MUST DO - Input Validation
+
+**Request Body Validation:**
+```java
+@PostMapping
+public ResponseEntity<AppResponse<PostCreateResponse>> createPost(
+    @Valid @RequestBody PostCreateRequest request,  // Always use @Valid
+    @CurrentUser UserEntity user) {
+    
+    return ResponseEntity.status(HttpStatus.CREATED)
+        .body(AppResponse.created(postService.createPost(request, user)));
+}
+```
+
+**Path Variable Validation:**
+```java
+@GetMapping("/{id}")
+public ResponseEntity<AppResponse<PostResponse>> getPost(
+    @PathVariable @Positive(message = "게시물 ID는 양수여야 합니다.") Long id) {
+    
+    return ResponseEntity.ok(AppResponse.ok(postService.getPost(id)));
+}
+```
+
+### ❌ NEVER DO - Security Violations
+
+1. **NEVER** skip input validation
+2. **NEVER** trust client-provided data
+3. **NEVER** expose sensitive information in responses
+4. **NEVER** implement authorization in controllers
+5. **NEVER** log sensitive data
+6. **NEVER** use HTTP for sensitive operations
+
+## 🔄 MANDATORY API VERSIONING
+
+### ✅ MUST DO - API Version Management
+
+**URL Path Versioning:**
+```java
+@RestController
+@RequestMapping("/api/v1/users")  // Version in URL path
+public class UserControllerV1 {
+    // Implementation
+}
+
+@RestController
+@RequestMapping("/api/v2/users")
+public class UserControllerV2 {
+    // Implementation
+}
+```
+
+**Deprecation Handling:**
+```java
+@GetMapping("/deprecated-endpoint")
+@Operation(summary = "구버전 API", deprecated = true)
+@Deprecated
+public ResponseEntity<AppResponse<OldResponse>> oldEndpoint() {
+    log.warn("Deprecated API called: /api/v1/users/deprecated-endpoint");
+    // Implementation
+}
+```
+
+### ❌ NEVER DO - Versioning Violations
+
+1. **NEVER** break backward compatibility without notice
+2. **NEVER** remove APIs without deprecation period
+3. **NEVER** change response formats in same version
+4. **NEVER** ignore version management
+5. **NEVER** mix different versioning strategies
+
+## 🚨 CRITICAL API QUALITY RULES
+
+### ✅ MUST DO - API Quality Checklist
+
+Before deploying APIs, ensure:
+
+✅ All endpoints have proper HTTP methods
+✅ Response formats are consistent
+✅ Error handling is comprehensive
+✅ Input validation is complete
+✅ Authentication/authorization is implemented
+✅ API documentation is up-to-date
+✅ Performance is acceptable
+✅ Security is verified
+
+### ❌ NEVER DO - Critical API Violations
+
+1. **Inconsistent Response Formats** - Always use standard wrappers
+2. **Missing Error Handling** - Every endpoint must handle errors
+3. **Poor Performance** - APIs must respond within 2 seconds
+4. **Security Gaps** - Never skip authentication/authorization
+5. **Undocumented Changes** - Always update documentation
+6. **Breaking Changes** - Never break existing integrations
+
+## 📊 PERFORMANCE REQUIREMENTS
+
+### ✅ MUST DO - Performance Standards
+
+**Response Time Limits:**
+- **Simple GET requests**: < 200ms
+- **Complex queries**: < 1000ms
+- **Create/Update operations**: < 2000ms
+- **File uploads**: < 5000ms
+
+**Pagination Requirements:**
+```java
+@GetMapping
+public ResponseEntity<AppResponse<PageResponse<PostResponse>>> getPosts(
+    @RequestParam(defaultValue = "0") @Min(0) int page,
+    @RequestParam(defaultValue = "10") @Min(1) @Max(100) int size,
+    @RequestParam(defaultValue = "createdAt") String sort) {
+    
+    return ResponseEntity.ok(AppResponse.ok(postService.getPosts(page, size, sort)));
+}
+```
+
+### ❌ NEVER DO - Performance Violations
+
+1. **NEVER** return unbounded result sets
+2. **NEVER** ignore database query optimization
+3. **NEVER** perform heavy operations in controllers
+4. **NEVER** skip caching for expensive operations
+5. **NEVER** ignore memory usage in large responses
+
+Remember: **APIs are contracts**. Design them carefully, document them thoroughly, and maintain them religiously!

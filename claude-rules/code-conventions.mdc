@@ -1,0 +1,691 @@
+---
+alwaysApply: true
+---
+
+# Code Conventions & Style Rules
+
+## 🎯 MANDATORY CODING STANDARDS
+
+### ✅ MUST DO - Java Code Style
+
+**1. Class Structure Order:**
+```java
+public class UserService {
+    // 1. Static constants (UPPER_SNAKE_CASE)
+    private static final String DEFAULT_ROLE = "USER";
+    
+    // 2. Instance fields (private, final when possible)
+    private final UserEntityRepository userRepository;
+    private final BCryptPasswordEncoder passwordEncoder;
+    
+    // 3. Constructor (with @RequiredArgsConstructor or manual)
+    public UserService(UserEntityRepository userRepository, 
+                      BCryptPasswordEncoder passwordEncoder) {
+        this.userRepository = userRepository;
+        this.passwordEncoder = passwordEncoder;
+    }
+    
+    // 4. Public methods
+    public UserCreateResponse createUser(String email, String password, String name) {
+        // Implementation
+    }
+    
+    // 5. Private methods
+    private void validateUserData(String email) {
+        // Implementation
+    }
+}
+```
+
+**2. Method Naming Patterns:**
+- **Create**: `create[Entity]`, `register[Entity]`
+- **Read**: `get[Entity]`, `find[Entity]`, `search[Entity]`
+- **Update**: `update[Entity]`, `modify[Entity]`
+- **Delete**: `delete[Entity]`, `remove[Entity]`
+- **Validation**: `validate[Field]`, `check[Condition]`
+- **Business Logic**: `process[Action]`, `handle[Event]`
+
+**3. Variable Naming:**
+```java
+// ✅ GOOD
+private final UserEntityRepository userEntityRepository;
+private final BCryptPasswordEncoder passwordEncoder;
+private final String accessToken;
+private final List<PostEntity> userPosts;
+
+// ❌ BAD
+private final UserEntityRepository repo;
+private final BCryptPasswordEncoder encoder;
+private final String token;
+private final List<PostEntity> posts;
+```
+
+### ❌ NEVER DO - Code Style Violations
+
+1. **NEVER** use single-letter variables except for loops
+2. **NEVER** use abbreviations in class/method names
+3. **NEVER** create methods longer than 50 lines
+4. **NEVER** use Hungarian notation
+5. **NEVER** mix camelCase and snake_case
+6. **NEVER** use magic numbers without constants
+
+## 🏗️ MANDATORY LOMBOK USAGE
+
+### ✅ MUST DO - Lombok Patterns
+
+**Entities:**
+```java
+@Entity
+@Table(name = "users")
+@Getter
+@NoArgsConstructor(access = AccessLevel.PROTECTED)
+@Builder
+public class UserEntity extends BaseEntity {
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private Long id;
+    
+    @Column(unique = true, nullable = false)
+    private String email;
+    
+    // Use @Builder for construction
+    @Builder
+    private UserEntity(String email, String password, String name) {
+        this.email = email;
+        this.password = password;
+        this.name = name;
+    }
+}
+```
+
+**Services:**
+```java
+@Service
+@RequiredArgsConstructor  // ALWAYS use for dependency injection
+@Slf4j                    // For logging
+public class UserService {
+    private final UserEntityRepository userRepository;
+    
+    public void logUserAction(String action) {
+        log.info("User action: {}", action);  // Use log, not System.out
+    }
+}
+```
+
+**DTOs (Records):**
+```java
+// ✅ PREFERRED: Use Java 17 Records
+public record UserCreateRequest(
+    @Email(message = "이메일 형식으로 요청해주세요.")
+    @NotBlank(message = "이메일은 필수입니다.")
+    String email,
+    
+    @NotBlank(message = "이름은 필수입니다.")
+    @Length(min = 1, max = 20, message = "이름은 2자 이상 20자 이하로 입력해주세요.")
+    String name,
+    
+    @Password(message = "비밀번호는 8자 이상 20자 이하, 영문, 숫자, 특수문자를 포함해야 합니다.")
+    String password
+) {
+    // Static factory methods if needed
+    public static UserCreateRequest of(String email, String name, String password) {
+        return new UserCreateRequest(email, name, password);
+    }
+}
+```
+
+### ❌ NEVER DO - Lombok Violations
+
+1. **NEVER** use `@Data` on entities (use `@Getter` only)
+2. **NEVER** use `@AllArgsConstructor` on entities
+3. **NEVER** use `@Setter` on entities (use builder pattern)
+4. **NEVER** use `@ToString` on entities with relationships
+5. **NEVER** use `@EqualsAndHashCode` without understanding implications
+
+## 🔧 MANDATORY ANNOTATION USAGE
+
+### ✅ MUST DO - Spring Annotations
+
+**Controllers:**
+```java
+@RestController
+@RequestMapping("/api/users")
+@RequiredArgsConstructor
+@Slf4j
+public class UserController {
+    
+    @PostMapping
+    @Operation(summary = "회원가입 API", description = "상세 설명")
+    @ApiResponse(responseCode = "400", description = "사용자 입력 오류[C-001]")
+    public ResponseEntity<AppResponse<UserCreateResponse>> createUser(
+        @RequestBody @Valid UserCreateRequest request) {
+        // Implementation
+    }
+}
+```
+
+**Services:**
+```java
+@Service
+@RequiredArgsConstructor
+@Transactional(readOnly = true)  // Default to read-only
+public class UserService {
+    
+    @Transactional  // Override for write operations
+    public UserCreateResponse createUser(String email, String password, String name) {
+        // Implementation
+    }
+}
+```
+
+**Validation:**
+```java
+// ✅ ALWAYS use validation annotations
+@NotBlank(message = "필드는 필수입니다.")
+@Email(message = "이메일 형식으로 입력해주세요.")
+@Length(min = 1, max = 50, message = "1자 이상 50자 이하로 입력해주세요.")
+@Pattern(regexp = "^[a-zA-Z0-9]*$", message = "영문과 숫자만 입력 가능합니다.")
+```
+
+### ❌ NEVER DO - Annotation Violations
+
+1. **NEVER** use `@Autowired` (use constructor injection)
+2. **NEVER** forget `@Valid` on request DTOs
+3. **NEVER** use `@Transactional` on controllers
+4. **NEVER** use `@RequestParam` for complex objects
+5. **NEVER** forget validation messages in Korean
+
+## 🎯 MANDATORY EXCEPTION HANDLING
+
+### ✅ MUST DO - Exception Patterns
+
+**Custom Exceptions:**
+```java
+// ✅ ALWAYS use AppException with ErrorCode
+public void validateUser(String email) {
+    if (userRepository.existsByEmail(email)) {
+        throw new AppException(ErrorCode.USER_EMAIL_DUPLICATED_EXCEPTION);
+    }
+}
+
+// ✅ ALWAYS provide context in error messages
+public UserEntity findUserById(Long id) {
+    return userRepository.findById(id)
+        .orElseThrow(() -> new AppException(ErrorCode.USER_NOT_FOUND_EXCEPTION));
+}
+```
+
+**Error Codes:**
+```java
+// ✅ FOLLOW this pattern: [DOMAIN_PREFIX]-[NUMBER]
+USER_NOT_FOUND_EXCEPTION(HttpStatus.NOT_FOUND, "U-002", "해당 유저를 찾을 수 없습니다."),
+POST_NOT_FOUND_EXCEPTION(HttpStatus.NOT_FOUND, "P-001", "해당 포스트를 찾을 수 없습니다."),
+```
+
+### ❌ NEVER DO - Exception Violations
+
+1. **NEVER** catch and ignore exceptions
+2. **NEVER** use generic Exception types
+3. **NEVER** return null (use Optional or throw exception)
+4. **NEVER** use English in error messages
+5. **NEVER** log exceptions in service layer (let global handler do it)
+
+## 🔍 MANDATORY DOCUMENTATION
+
+### ✅ MUST DO - Code Documentation
+
+**API Documentation:**
+```java
+@Operation(
+    summary = "회원가입 API",
+    description = "이메일, 비밀번호, 이름을 입력하여 회원가입을 진행합니다.",
+    responses = {
+        @ApiResponse(responseCode = "201", description = "회원가입 성공"),
+        @ApiResponse(responseCode = "400", description = "사용자 입력 오류[C-001]"),
+        @ApiResponse(responseCode = "409", description = "이미 사용중인 이메일입니다.[U-001]")
+    }
+)
+```
+
+**Method Documentation:**
+```java
+/**
+ * 사용자 회원가입 처리
+ * 
+ * @param email 사용자 이메일 (유효성 검증 필요)
+ * @param password 암호화되지 않은 비밀번호
+ * @param name 사용자 이름
+ * @return 생성된 사용자 정보
+ * @throws AppException 이메일 중복 시 USER_EMAIL_DUPLICATED_EXCEPTION
+ */
+@Transactional
+public UserCreateResponse createUser(String email, String password, String name) {
+    // Implementation
+}
+```
+
+### ❌ NEVER DO - Documentation Violations
+
+1. **NEVER** leave public methods without documentation
+2. **NEVER** use English in user-facing messages
+3. **NEVER** forget to update documentation when changing code
+4. **NEVER** use TODO comments in production code
+
+## 🚨 CRITICAL CODE QUALITY RULES
+
+### ✅ MUST DO - Quality Assurance
+
+1. **ALWAYS** use meaningful variable names
+2. **ALWAYS** validate input parameters
+3. **ALWAYS** use appropriate data types
+4. **ALWAYS** handle edge cases
+5. **ALWAYS** follow single responsibility principle
+6. **ALWAYS** use immutable objects when possible
+7. **ALWAYS** prefer composition over inheritance
+
+### ❌ NEVER DO - Quality Violations
+
+1. **NEVER** use System.out.println (use logging)
+2. **NEVER** hardcode sensitive information
+3. **NEVER** create God classes (>500 lines)
+4. **NEVER** use reflection without good reason
+5. **NEVER** ignore compiler warnings
+6. **NEVER** commit commented-out code
+7. **NEVER** use deprecated APIs
+
+## 🔧 CODE FORMATTING RULES
+
+### ✅ MUST DO - Formatting Standards
+
+```java
+// ✅ Method parameters (one per line if >3 params)
+public ResponseEntity<AppResponse<UserCreateResponse>> createUser(
+    @RequestBody @Valid UserCreateRequest request,
+    @CurrentUser UserEntity currentUser,
+    HttpServletRequest httpRequest) {
+    
+    // ✅ Chain method calls
+    return userRepository.findByEmail(email)
+        .map(this::convertToResponse)
+        .orElseThrow(() -> new AppException(ErrorCode.USER_NOT_FOUND_EXCEPTION));
+}
+
+// ✅ Complex conditionals
+if (user.isActive() 
+    && user.hasPermission(Permission.WRITE)
+    && !user.isExpired()) {
+    // Implementation
+}
+```
+
+### ❌ NEVER DO - Formatting Violations
+
+1. **NEVER** exceed 120 characters per line
+2. **NEVER** use tabs (use 4 spaces)
+3. **NEVER** leave trailing whitespace
+4. **NEVER** mix different indentation styles
+5. **NEVER** skip empty lines between logical blocks
+
+Remember: **Code is read more often than it's written**. Make it readable and maintainable!
+# Code Conventions & Style Rules
+
+## 🎯 MANDATORY CODING STANDARDS
+
+### ✅ MUST DO - Java Code Style
+
+**1. Class Structure Order:**
+```java
+public class UserService {
+    // 1. Static constants (UPPER_SNAKE_CASE)
+    private static final String DEFAULT_ROLE = "USER";
+    
+    // 2. Instance fields (private, final when possible)
+    private final UserEntityRepository userRepository;
+    private final BCryptPasswordEncoder passwordEncoder;
+    
+    // 3. Constructor (with @RequiredArgsConstructor or manual)
+    public UserService(UserEntityRepository userRepository, 
+                      BCryptPasswordEncoder passwordEncoder) {
+        this.userRepository = userRepository;
+        this.passwordEncoder = passwordEncoder;
+    }
+    
+    // 4. Public methods
+    public UserCreateResponse createUser(String email, String password, String name) {
+        // Implementation
+    }
+    
+    // 5. Private methods
+    private void validateUserData(String email) {
+        // Implementation
+    }
+}
+```
+
+**2. Method Naming Patterns:**
+- **Create**: `create[Entity]`, `register[Entity]`
+- **Read**: `get[Entity]`, `find[Entity]`, `search[Entity]`
+- **Update**: `update[Entity]`, `modify[Entity]`
+- **Delete**: `delete[Entity]`, `remove[Entity]`
+- **Validation**: `validate[Field]`, `check[Condition]`
+- **Business Logic**: `process[Action]`, `handle[Event]`
+
+**3. Variable Naming:**
+```java
+// ✅ GOOD
+private final UserEntityRepository userEntityRepository;
+private final BCryptPasswordEncoder passwordEncoder;
+private final String accessToken;
+private final List<PostEntity> userPosts;
+
+// ❌ BAD
+private final UserEntityRepository repo;
+private final BCryptPasswordEncoder encoder;
+private final String token;
+private final List<PostEntity> posts;
+```
+
+### ❌ NEVER DO - Code Style Violations
+
+1. **NEVER** use single-letter variables except for loops
+2. **NEVER** use abbreviations in class/method names
+3. **NEVER** create methods longer than 50 lines
+4. **NEVER** use Hungarian notation
+5. **NEVER** mix camelCase and snake_case
+6. **NEVER** use magic numbers without constants
+
+## 🏗️ MANDATORY LOMBOK USAGE
+
+### ✅ MUST DO - Lombok Patterns
+
+**Entities:**
+```java
+@Entity
+@Table(name = "users")
+@Getter
+@NoArgsConstructor(access = AccessLevel.PROTECTED)
+@Builder
+public class UserEntity extends BaseEntity {
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private Long id;
+    
+    @Column(unique = true, nullable = false)
+    private String email;
+    
+    // Use @Builder for construction
+    @Builder
+    private UserEntity(String email, String password, String name) {
+        this.email = email;
+        this.password = password;
+        this.name = name;
+    }
+}
+```
+
+**Services:**
+```java
+@Service
+@RequiredArgsConstructor  // ALWAYS use for dependency injection
+@Slf4j                    // For logging
+public class UserService {
+    private final UserEntityRepository userRepository;
+    
+    public void logUserAction(String action) {
+        log.info("User action: {}", action);  // Use log, not System.out
+    }
+}
+```
+
+**DTOs (Records):**
+```java
+// ✅ PREFERRED: Use Java 17 Records
+public record UserCreateRequest(
+    @Email(message = "이메일 형식으로 요청해주세요.")
+    @NotBlank(message = "이메일은 필수입니다.")
+    String email,
+    
+    @NotBlank(message = "이름은 필수입니다.")
+    @Length(min = 1, max = 20, message = "이름은 2자 이상 20자 이하로 입력해주세요.")
+    String name,
+    
+    @Password(message = "비밀번호는 8자 이상 20자 이하, 영문, 숫자, 특수문자를 포함해야 합니다.")
+    String password
+) {
+    // Static factory methods if needed
+    public static UserCreateRequest of(String email, String name, String password) {
+        return new UserCreateRequest(email, name, password);
+    }
+}
+```
+
+### ❌ NEVER DO - Lombok Violations
+
+1. **NEVER** use `@Data` on entities (use `@Getter` only)
+2. **NEVER** use `@AllArgsConstructor` on entities
+3. **NEVER** use `@Setter` on entities (use builder pattern)
+4. **NEVER** use `@ToString` on entities with relationships
+5. **NEVER** use `@EqualsAndHashCode` without understanding implications
+
+## 🔧 MANDATORY ANNOTATION USAGE
+
+### ✅ MUST DO - Spring Annotations
+
+**Controllers:**
+```java
+@RestController
+@RequestMapping("/api/users")
+@RequiredArgsConstructor
+@Slf4j
+public class UserController {
+    
+    @PostMapping
+    @Operation(summary = "회원가입 API", description = "상세 설명")
+    @ApiResponse(responseCode = "400", description = "사용자 입력 오류[C-001]")
+    public ResponseEntity<AppResponse<UserCreateResponse>> createUser(
+        @RequestBody @Valid UserCreateRequest request) {
+        // Implementation
+    }
+}
+```
+
+**Services:**
+```java
+@Service
+@RequiredArgsConstructor
+@Transactional(readOnly = true)  // Default to read-only
+public class UserService {
+    
+    @Transactional  // Override for write operations
+    public UserCreateResponse createUser(String email, String password, String name) {
+        // Implementation
+    }
+}
+```
+
+**Validation:**
+```java
+// ✅ ALWAYS use validation annotations
+@NotBlank(message = "필드는 필수입니다.")
+@Email(message = "이메일 형식으로 입력해주세요.")
+@Length(min = 1, max = 50, message = "1자 이상 50자 이하로 입력해주세요.")
+@Pattern(regexp = "^[a-zA-Z0-9]*$", message = "영문과 숫자만 입력 가능합니다.")
+```
+
+### ❌ NEVER DO - Annotation Violations
+
+1. **NEVER** use `@Autowired` (use constructor injection)
+2. **NEVER** forget `@Valid` on request DTOs
+3. **NEVER** use `@Transactional` on controllers
+4. **NEVER** use `@RequestParam` for complex objects
+5. **NEVER** forget validation messages in Korean
+
+## 🎯 MANDATORY EXCEPTION HANDLING
+
+### ✅ MUST DO - Exception Patterns
+
+**Custom Exceptions:**
+```java
+// ✅ ALWAYS use AppException with ErrorCode
+public void validateUser(String email) {
+    if (userRepository.existsByEmail(email)) {
+        throw new AppException(ErrorCode.USER_EMAIL_DUPLICATED_EXCEPTION);
+    }
+}
+
+// ✅ ALWAYS provide context in error messages
+public UserEntity findUserById(Long id) {
+    return userRepository.findById(id)
+        .orElseThrow(() -> new AppException(ErrorCode.USER_NOT_FOUND_EXCEPTION));
+}
+```
+
+**Error Codes:**
+```java
+// ✅ FOLLOW this pattern: [DOMAIN_PREFIX]-[NUMBER]
+USER_NOT_FOUND_EXCEPTION(HttpStatus.NOT_FOUND, "U-002", "해당 유저를 찾을 수 없습니다."),
+POST_NOT_FOUND_EXCEPTION(HttpStatus.NOT_FOUND, "P-001", "해당 포스트를 찾을 수 없습니다."),
+```
+
+### ❌ NEVER DO - Exception Violations
+
+1. **NEVER** catch and ignore exceptions
+2. **NEVER** use generic Exception types
+3. **NEVER** return null (use Optional or throw exception)
+4. **NEVER** use English in error messages
+5. **NEVER** log exceptions in service layer (let global handler do it)
+
+## 🔍 MANDATORY DOCUMENTATION
+
+### ✅ MUST DO - Code Documentation
+
+**API Documentation:**
+```java
+@Operation(
+    summary = "회원가입 API",
+    description = "이메일, 비밀번호, 이름을 입력하여 회원가입을 진행합니다.",
+    responses = {
+        @ApiResponse(responseCode = "201", description = "회원가입 성공"),
+        @ApiResponse(responseCode = "400", description = "사용자 입력 오류[C-001]"),
+        @ApiResponse(responseCode = "409", description = "이미 사용중인 이메일입니다.[U-001]")
+    }
+)
+```
+
+**Method Documentation:**
+```java
+/**
+ * 사용자 회원가입 처리
+ * 
+ * @param email 사용자 이메일 (유효성 검증 필요)
+ * @param password 암호화되지 않은 비밀번호
+ * @param name 사용자 이름
+ * @return 생성된 사용자 정보
+ * @throws AppException 이메일 중복 시 USER_EMAIL_DUPLICATED_EXCEPTION
+ */
+@Transactional
+public UserCreateResponse createUser(String email, String password, String name) {
+    // Implementation
+}
+```
+
+### ❌ NEVER DO - Documentation Violations
+
+1. **NEVER** leave public methods without documentation
+2. **NEVER** use English in user-facing messages
+3. **NEVER** forget to update documentation when changing code
+4. **NEVER** use TODO comments in production code
+
+## 🚨 CRITICAL CODE QUALITY RULES
+
+### ✅ MUST DO - Quality Assurance
+
+1. **ALWAYS** use meaningful variable names
+2. **ALWAYS** validate input parameters
+3. **ALWAYS** use appropriate data types
+4. **ALWAYS** handle edge cases
+5. **ALWAYS** follow single responsibility principle
+6. **ALWAYS** use immutable objects when possible
+7. **ALWAYS** prefer composition over inheritance
+
+### ❌ NEVER DO - Quality Violations
+
+1. **NEVER** use System.out.println (use logging)
+2. **NEVER** hardcode sensitive information
+3. **NEVER** create God classes (>500 lines)
+4. **NEVER** use reflection without good reason
+5. **NEVER** ignore compiler warnings
+6. **NEVER** commit commented-out code
+7. **NEVER** use deprecated APIs
+
+## 🔧 CODE FORMATTING RULES
+
+### ✅ MUST DO - Formatting Standards
+
+```java
+// ✅ Method parameters (one per line if >3 params)
+public ResponseEntity<AppResponse<UserCreateResponse>> createUser(
+    @RequestBody @Valid UserCreateRequest request,
+    @CurrentUser UserEntity currentUser,
+    HttpServletRequest httpRequest) {
+    
+    // ✅ Chain method calls
+    return userRepository.findByEmail(email)
+        .map(this::convertToResponse)
+        .orElseThrow(() -> new AppException(ErrorCode.USER_NOT_FOUND_EXCEPTION));
+}
+
+// ✅ Complex conditionals
+if (user.isActive() 
+    && user.hasPermission(Permission.WRITE)
+    && !user.isExpired()) {
+    // Implementation
+}
+```
+
+### ❌ NEVER DO - Formatting Violations
+
+1. **NEVER** exceed 120 characters per line
+2. **NEVER** use tabs (use 4 spaces)
+3. **NEVER** leave trailing whitespace
+4. **NEVER** mix different indentation styles
+5. **NEVER** skip empty lines between logical blocks
+
+Remember: **Code is read more often than it's written**. Make it readable and maintainable!
+
+
+### 🚨 **CRITICAL: PRESERVE EXISTING CODE FORMATTING**
+
+**When making changes to existing code, you MUST preserve the original formatting style:**
+
+```java
+// ❌ NEVER change existing formatting unless specifically requested
+// Original code:
+AppException exception = assertThrows(AppException.class, () ->
+  aiImageGenerationService.createAiImageGetUrl(TEST_REQUEST_ID, TEST_USER_ID));
+
+// ❌ DO NOT "improve" it to:
+AppException exception = assertThrows(AppException.class, 
+  () -> aiImageGenerationService.someMethod(param));
+
+// ✅ KEEP the original formatting intact
+AppException exception = assertThrows(AppException.class, () ->
+  aiImageGenerationService.createAiImageGetUrl(TEST_REQUEST_ID, TEST_USER_ID));
+```
+
+**Formatting Preservation Rules:**
+1. **NEVER** change indentation style of existing code
+2. **NEVER** change line breaking patterns of existing code  
+3. **NEVER** change bracket placement of existing code
+4. **NEVER** change parameter alignment of existing code
+5. **ONLY** apply formatting changes when explicitly requested by user
+6. **ONLY** format new code you add, not existing code you touch
+
+**Exception:** Only change formatting if:
+- User explicitly requests formatting changes
+- The existing formatting violates critical readability (> 200 chars per line)
+- You're doing a dedicated formatting/refactoring task
+
+### ✅ MUST DO - Java Code Style
+
+**1. Class Structure Order:** 

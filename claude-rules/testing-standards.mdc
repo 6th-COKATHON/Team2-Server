@@ -1,0 +1,858 @@
+---
+alwaysApply: true
+---
+
+# Testing Standards & Best Practices
+
+## 🧪 MANDATORY TESTING STRUCTURE
+
+### ✅ MUST DO - Test Organization
+
+**Test Package Structure:**
+```
+src/test/java/
+├── base/                           # Test utilities and base classes
+│   ├── BaseIntegrationTest.java   # Integration test base
+│   ├── BaseControllerTest.java    # Controller test base
+│   ├── TestUtil.java              # Test utilities
+│   └── DatabaseCleanUp.java       # Database cleanup
+├── domain/                         # Domain layer tests
+│   └── [domain]/
+│       ├── service/               # Service unit tests
+│       ├── repository/            # Repository integration tests
+│       └── entityfactory/         # Test data factories
+└── web/                           # Web layer tests
+    └── [domain]/
+        └── controller/            # Controller integration tests
+```
+
+**Test Class Naming:**
+- **Unit Tests**: `[ClassName]Test.java`
+- **Integration Tests**: `[ClassName]IntegrationTest.java`
+- **Controller Tests**: `[ClassName]ControllerTest.java`
+
+### ✅ MUST DO - Test Method Naming
+
+**Pattern**: `[methodName]_[scenario]_[expectedResult]`
+
+```java
+// ✅ GOOD Examples
+@Test
+@DisplayName("회원가입 성공 - 유효한 데이터")
+void createUser_ValidData_ShouldReturnUserCreateResponse() {
+    // Test implementation
+}
+
+@Test
+@DisplayName("회원가입 실패 - 이메일 중복")
+void createUser_DuplicateEmail_ShouldThrowAppException() {
+    // Test implementation
+}
+
+@Test
+@DisplayName("사용자 조회 실패 - 존재하지 않는 ID")
+void getUserById_NonExistentId_ShouldThrowUserNotFoundException() {
+    // Test implementation
+}
+```
+
+### ❌ NEVER DO - Test Structure Violations
+
+1. **NEVER** put test classes in src/main/java
+2. **NEVER** create tests without proper package structure
+3. **NEVER** use generic test method names like `test1()`, `testMethod()`
+4. **NEVER** skip `@DisplayName` annotation
+5. **NEVER** mix different types of tests in the same class
+
+## 🎯 MANDATORY UNIT TESTING PATTERNS
+
+### ✅ MUST DO - Service Layer Testing
+
+```java
+@ExtendWith(MockitoExtension.class)
+class UserServiceTest {
+    
+    @InjectMocks
+    private UserService userService;
+    
+    @Mock
+    private UserEntityRepository userRepository;
+    
+    @Mock
+    private BCryptPasswordEncoder passwordEncoder;
+    
+    @Test
+    @DisplayName("회원가입 성공")
+    void createUser_ValidData_ShouldReturnUserCreateResponse() {
+        // given
+        String email = "test@example.com";
+        String password = "password123!";
+        String name = "Test User";
+        
+        when(userRepository.existsByEmail(email)).thenReturn(false);
+        when(passwordEncoder.encode(password)).thenReturn("encodedPassword");
+        
+        // when
+        UserCreateResponse result = userService.createUser(email, password, name);
+        
+        // then
+        assertThat(result).isNotNull();
+        assertThat(result.email()).isEqualTo(email);
+        assertThat(result.name()).isEqualTo(name);
+        
+        verify(userRepository).existsByEmail(email);
+        verify(passwordEncoder).encode(password);
+        verify(userRepository).save(any(UserEntity.class));
+    }
+    
+    @Test
+    @DisplayName("회원가입 실패 - 이메일 중복")
+    void createUser_DuplicateEmail_ShouldThrowAppException() {
+        // given
+        String email = "duplicate@example.com";
+        String password = "password123!";
+        String name = "Test User";
+        
+        when(userRepository.existsByEmail(email)).thenReturn(true);
+        
+        // when & then
+        AppException exception = assertThrows(AppException.class, 
+            () -> userService.createUser(email, password, name));
+        
+        assertThat(exception.getErrorCode()).isEqualTo(ErrorCode.USER_EMAIL_DUPLICATED_EXCEPTION);
+        
+        verify(userRepository).existsByEmail(email);
+        verify(passwordEncoder, never()).encode(any());
+        verify(userRepository, never()).save(any());
+    }
+}
+```
+
+### ✅ MUST DO - Repository Testing
+
+```java
+@DataJpaTest
+class UserEntityRepositoryTest {
+    
+    @Autowired
+    private TestEntityManager entityManager;
+    
+    @Autowired
+    private UserEntityRepository userRepository;
+    
+    @Test
+    @DisplayName("이메일로 사용자 조회 성공")
+    void findByEmail_ExistingEmail_ShouldReturnUser() {
+        // given
+        UserEntity user = UserEntity.builder()
+            .email("test@example.com")
+            .password("password")
+            .name("Test User")
+            .build();
+        entityManager.persistAndFlush(user);
+        
+        // when
+        Optional<UserEntity> result = userRepository.findByEmail("test@example.com");
+        
+        // then
+        assertThat(result).isPresent();
+        assertThat(result.get().getEmail()).isEqualTo("test@example.com");
+    }
+}
+```
+
+### ❌ NEVER DO - Unit Test Violations
+
+1. **NEVER** use real database in unit tests
+2. **NEVER** test multiple scenarios in one test method
+3. **NEVER** use `@SpringBootTest` for unit tests
+4. **NEVER** ignore test failures
+5. **NEVER** create tests without assertions
+
+## 🌐 MANDATORY INTEGRATION TESTING
+
+### ✅ MUST DO - Controller Integration Testing
+
+```java
+@SpringBootTest
+@AutoConfigureMockMvc(addFilters = false)
+@ActiveProfiles("test")
+class UserControllerIntegrationTest extends BaseIntegrationTest {
+    
+    @Autowired
+    private UserEntityRepository userRepository;
+    
+    @Test
+    @DisplayName("회원가입 API 성공")
+    void createUser_ValidRequest_ShouldReturn201() throws Exception {
+        // given
+        UserCreateRequest request = new UserCreateRequest(
+            "test@example.com", 
+            "Test User", 
+            "password123!"
+        );
+        
+        // when & then
+        mockMvc.perform(post("/api/users")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(objectMapper.writeValueAsString(request)))
+            .andExpect(status().isCreated())
+            .andExpect(jsonPath("$.isSuccess").value(true))
+            .andExpect(jsonPath("$.data.email").value("test@example.com"))
+            .andExpect(jsonPath("$.data.name").value("Test User"));
+        
+        // Verify database state
+        assertThat(userRepository.existsByEmail("test@example.com")).isTrue();
+    }
+    
+    @Test
+    @DisplayName("회원가입 API 실패 - 잘못된 이메일 형식")
+    void createUser_InvalidEmail_ShouldReturn400() throws Exception {
+        // given
+        UserCreateRequest request = new UserCreateRequest(
+            "invalid-email", 
+            "Test User", 
+            "password123!"
+        );
+        
+        // when & then
+        mockMvc.perform(post("/api/users")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(objectMapper.writeValueAsString(request)))
+            .andExpect(status().isBadRequest())
+            .andExpect(jsonPath("$.code").value("C-001"))
+            .andExpect(jsonPath("$.reason[0]").value("이메일 형식으로 요청해주세요."));
+    }
+}
+```
+
+### ✅ MUST DO - Authentication Testing
+
+```java
+@Test
+@DisplayName("인증된 사용자 요청 성공")
+@WithCustomUser(email = "test@example.com")
+void getUserInfo_AuthenticatedUser_ShouldReturnUserInfo() throws Exception {
+    // given
+    UserEntity user = ContextHolderUtil.getCurrentUser();
+    
+    // when & then
+    mockMvc.perform(get("/api/users/me"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.data.email").value(user.getEmail()));
+}
+```
+
+### ❌ NEVER DO - Integration Test Violations
+
+1. **NEVER** use mock objects in integration tests
+2. **NEVER** skip database cleanup between tests
+3. **NEVER** test only happy path scenarios
+4. **NEVER** hardcode test data in integration tests
+5. **NEVER** ignore test database configuration
+
+## 📊 MANDATORY PARAMETERIZED TESTING
+
+### ✅ MUST DO - Multiple Scenario Testing
+
+```java
+@ParameterizedTest(name = "[{index}] {0}")
+@MethodSource("invalidUserCreateRequests")
+@DisplayName("회원가입 요청 실패 - 잘못된 입력")
+void createUser_InvalidRequest_ShouldReturn400(
+    String description, 
+    UserCreateRequest request, 
+    String expectedErrorMessage) throws Exception {
+    
+    // when & then
+    mockMvc.perform(post("/api/users")
+            .contentType(MediaType.APPLICATION_JSON)
+            .content(objectMapper.writeValueAsString(request)))
+        .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.reason[0]").value(expectedErrorMessage));
+}
+
+static Stream<Arguments> invalidUserCreateRequests() {
+    return Stream.of(
+        Arguments.of(
+            "이메일이 빈 문자열인 경우",
+            new UserCreateRequest("", "Test User", "password123!"),
+            "이메일은 필수입니다."
+        ),
+        Arguments.of(
+            "이메일 형식이 잘못된 경우",
+            new UserCreateRequest("invalid-email", "Test User", "password123!"),
+            "이메일 형식으로 요청해주세요."
+        ),
+        Arguments.of(
+            "이름이 빈 문자열인 경우",
+            new UserCreateRequest("test@example.com", "", "password123!"),
+            "이름은 필수입니다."
+        )
+    );
+}
+```
+
+### ✅ MUST DO - Test Data Factories
+
+```java
+// UserFactory.java
+public class UserFactory {
+    
+    public static UserEntity createMockUser(Long id) {
+        return UserEntity.builder()
+            .id(id)
+            .email("test" + id + "@example.com")
+            .password("encodedPassword")
+            .name("Test User " + id)
+            .build();
+    }
+    
+    public static UserEntity createMockUserWithoutId(String prefix) {
+        return UserEntity.builder()
+            .email(prefix + "@example.com")
+            .password("encodedPassword")
+            .name(prefix + " User")
+            .build();
+    }
+}
+```
+
+### ❌ NEVER DO - Test Data Violations
+
+1. **NEVER** hardcode test data in test methods
+2. **NEVER** reuse test data between unrelated tests
+3. **NEVER** create test data without proper cleanup
+4. **NEVER** use production data in tests
+5. **NEVER** ignore test data consistency
+
+## 🔍 MANDATORY TEST QUALITY RULES
+
+### ✅ MUST DO - Test Quality Assurance
+
+**Test Structure (AAA Pattern):**
+```java
+@Test
+@DisplayName("테스트 시나리오 설명")
+void testMethod_scenario_expectedResult() {
+    // given (Arrange)
+    // 테스트 데이터 및 모킹 설정
+    
+    // when (Act)
+    // 테스트 대상 메서드 실행
+    
+    // then (Assert)
+    // 결과 검증 및 모킹 검증
+}
+```
+
+**Assertion Best Practices:**
+```java
+// ✅ GOOD - Use AssertJ for fluent assertions
+assertThat(result).isNotNull();
+assertThat(result.getEmail()).isEqualTo("test@example.com");
+assertThat(result.getPosts()).hasSize(3);
+assertThat(result.isActive()).isTrue();
+
+// ✅ GOOD - Verify mock interactions
+verify(userRepository).save(any(UserEntity.class));
+verify(passwordEncoder).encode(password);
+verifyNoMoreInteractions(userRepository);
+
+// ❌ BAD - Don't use JUnit assertions
+assertEquals("test@example.com", result.getEmail());
+assertTrue(result.isActive());
+```
+
+### ✅ MUST DO - Test Coverage Requirements
+
+1. **Service Layer**: 90%+ coverage
+2. **Controller Layer**: 85%+ coverage
+3. **Repository Layer**: 80%+ coverage
+4. **Exception Handling**: 100% coverage
+5. **Business Logic**: 95%+ coverage
+
+### ❌ NEVER DO - Test Quality Violations
+
+1. **NEVER** ignore flaky tests
+2. **NEVER** create tests that depend on external services
+3. **NEVER** use random data without controlling randomness
+4. **NEVER** create tests that take longer than 5 seconds
+5. **NEVER** skip testing edge cases
+6. **NEVER** create tests without proper cleanup
+7. **NEVER** use deprecated testing frameworks
+
+## 🚨 CRITICAL TESTING RULES
+
+### ✅ MUST DO - Testing Checklist
+
+Before committing tests, ensure:
+
+✅ All tests pass consistently
+✅ Test names clearly describe scenarios
+✅ Tests are independent and isolated
+✅ Mock objects are properly configured
+✅ Database state is cleaned between tests
+✅ Test data is realistic but not production data
+✅ Edge cases and error scenarios are covered
+✅ Performance tests exist for critical paths
+
+### ❌ NEVER DO - Critical Test Violations
+
+1. **Test Pollution** - Tests affecting each other
+2. **Test Dependency** - Tests requiring specific execution order
+3. **Test Duplication** - Testing same logic multiple times
+4. **Test Complexity** - Tests that are hard to understand
+5. **Test Neglect** - Broken tests left unfixed
+6. **Test Shortage** - Critical paths without tests
+
+## 📈 PERFORMANCE TESTING REQUIREMENTS
+
+### ✅ MUST DO - Performance Test Examples
+
+```java
+@Test
+@DisplayName("대용량 데이터 처리 성능 테스트")
+void processLargeDataSet_ShouldCompleteWithinTimeLimit() {
+    // given
+    List<UserEntity> users = createLargeUserDataSet(10000);
+    
+    // when
+    long startTime = System.currentTimeMillis();
+    userService.processBatchUsers(users);
+    long endTime = System.currentTimeMillis();
+    
+    // then
+    long executionTime = endTime - startTime;
+    assertThat(executionTime).isLessThan(5000); // 5초 이내
+}
+```
+
+Remember: **Tests are your safety net**. Write them first, write them well, and maintain them religiously!
+# Testing Standards & Best Practices
+
+## 🧪 MANDATORY TESTING STRUCTURE
+
+### ✅ MUST DO - Test Organization
+
+**Test Package Structure:**
+```
+src/test/java/
+├── base/                           # Test utilities and base classes
+│   ├── BaseIntegrationTest.java   # Integration test base
+│   ├── BaseControllerTest.java    # Controller test base
+│   ├── TestUtil.java              # Test utilities
+│   └── DatabaseCleanUp.java       # Database cleanup
+├── domain/                         # Domain layer tests
+│   └── [domain]/
+│       ├── service/               # Service unit tests
+│       ├── repository/            # Repository integration tests
+│       └── entityfactory/         # Test data factories
+└── web/                           # Web layer tests
+    └── [domain]/
+        └── controller/            # Controller integration tests
+```
+
+**Test Class Naming:**
+- **Unit Tests**: `[ClassName]Test.java`
+- **Integration Tests**: `[ClassName]IntegrationTest.java`
+- **Controller Tests**: `[ClassName]ControllerTest.java`
+
+### ✅ MUST DO - Test Method Naming
+
+**Pattern**: `[methodName]_[scenario]_[expectedResult]`
+
+```java
+// ✅ GOOD Examples
+@Test
+@DisplayName("회원가입 성공 - 유효한 데이터")
+void createUser_ValidData_ShouldReturnUserCreateResponse() {
+    // Test implementation
+}
+
+@Test
+@DisplayName("회원가입 실패 - 이메일 중복")
+void createUser_DuplicateEmail_ShouldThrowAppException() {
+    // Test implementation
+}
+
+@Test
+@DisplayName("사용자 조회 실패 - 존재하지 않는 ID")
+void getUserById_NonExistentId_ShouldThrowUserNotFoundException() {
+    // Test implementation
+}
+```
+
+### ❌ NEVER DO - Test Structure Violations
+
+1. **NEVER** put test classes in src/main/java
+2. **NEVER** create tests without proper package structure
+3. **NEVER** use generic test method names like `test1()`, `testMethod()`
+4. **NEVER** skip `@DisplayName` annotation
+5. **NEVER** mix different types of tests in the same class
+
+## 🎯 MANDATORY UNIT TESTING PATTERNS
+
+### ✅ MUST DO - Service Layer Testing
+
+```java
+@ExtendWith(MockitoExtension.class)
+class UserServiceTest {
+    
+    @InjectMocks
+    private UserService userService;
+    
+    @Mock
+    private UserEntityRepository userRepository;
+    
+    @Mock
+    private BCryptPasswordEncoder passwordEncoder;
+    
+    @Test
+    @DisplayName("회원가입 성공")
+    void createUser_ValidData_ShouldReturnUserCreateResponse() {
+        // given
+        String email = "test@example.com";
+        String password = "password123!";
+        String name = "Test User";
+        
+        when(userRepository.existsByEmail(email)).thenReturn(false);
+        when(passwordEncoder.encode(password)).thenReturn("encodedPassword");
+        
+        // when
+        UserCreateResponse result = userService.createUser(email, password, name);
+        
+        // then
+        assertThat(result).isNotNull();
+        assertThat(result.email()).isEqualTo(email);
+        assertThat(result.name()).isEqualTo(name);
+        
+        verify(userRepository).existsByEmail(email);
+        verify(passwordEncoder).encode(password);
+        verify(userRepository).save(any(UserEntity.class));
+    }
+    
+    @Test
+    @DisplayName("회원가입 실패 - 이메일 중복")
+    void createUser_DuplicateEmail_ShouldThrowAppException() {
+        // given
+        String email = "duplicate@example.com";
+        String password = "password123!";
+        String name = "Test User";
+        
+        when(userRepository.existsByEmail(email)).thenReturn(true);
+        
+        // when & then
+        AppException exception = assertThrows(AppException.class, 
+            () -> userService.createUser(email, password, name));
+        
+        assertThat(exception.getErrorCode()).isEqualTo(ErrorCode.USER_EMAIL_DUPLICATED_EXCEPTION);
+        
+        verify(userRepository).existsByEmail(email);
+        verify(passwordEncoder, never()).encode(any());
+        verify(userRepository, never()).save(any());
+    }
+}
+```
+
+### ✅ MUST DO - Repository Testing
+
+```java
+@DataJpaTest
+class UserEntityRepositoryTest {
+    
+    @Autowired
+    private TestEntityManager entityManager;
+    
+    @Autowired
+    private UserEntityRepository userRepository;
+    
+    @Test
+    @DisplayName("이메일로 사용자 조회 성공")
+    void findByEmail_ExistingEmail_ShouldReturnUser() {
+        // given
+        UserEntity user = UserEntity.builder()
+            .email("test@example.com")
+            .password("password")
+            .name("Test User")
+            .build();
+        entityManager.persistAndFlush(user);
+        
+        // when
+        Optional<UserEntity> result = userRepository.findByEmail("test@example.com");
+        
+        // then
+        assertThat(result).isPresent();
+        assertThat(result.get().getEmail()).isEqualTo("test@example.com");
+    }
+}
+```
+
+### ❌ NEVER DO - Unit Test Violations
+
+1. **NEVER** use real database in unit tests
+2. **NEVER** test multiple scenarios in one test method
+3. **NEVER** use `@SpringBootTest` for unit tests
+4. **NEVER** ignore test failures
+5. **NEVER** create tests without assertions
+
+## 🌐 MANDATORY INTEGRATION TESTING
+
+### ✅ MUST DO - Controller Integration Testing
+
+```java
+@SpringBootTest
+@AutoConfigureMockMvc(addFilters = false)
+@ActiveProfiles("test")
+class UserControllerIntegrationTest extends BaseIntegrationTest {
+    
+    @Autowired
+    private UserEntityRepository userRepository;
+    
+    @Test
+    @DisplayName("회원가입 API 성공")
+    void createUser_ValidRequest_ShouldReturn201() throws Exception {
+        // given
+        UserCreateRequest request = new UserCreateRequest(
+            "test@example.com", 
+            "Test User", 
+            "password123!"
+        );
+        
+        // when & then
+        mockMvc.perform(post("/api/users")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(objectMapper.writeValueAsString(request)))
+            .andExpect(status().isCreated())
+            .andExpect(jsonPath("$.isSuccess").value(true))
+            .andExpect(jsonPath("$.data.email").value("test@example.com"))
+            .andExpect(jsonPath("$.data.name").value("Test User"));
+        
+        // Verify database state
+        assertThat(userRepository.existsByEmail("test@example.com")).isTrue();
+    }
+    
+    @Test
+    @DisplayName("회원가입 API 실패 - 잘못된 이메일 형식")
+    void createUser_InvalidEmail_ShouldReturn400() throws Exception {
+        // given
+        UserCreateRequest request = new UserCreateRequest(
+            "invalid-email", 
+            "Test User", 
+            "password123!"
+        );
+        
+        // when & then
+        mockMvc.perform(post("/api/users")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(objectMapper.writeValueAsString(request)))
+            .andExpect(status().isBadRequest())
+            .andExpect(jsonPath("$.code").value("C-001"))
+            .andExpect(jsonPath("$.reason[0]").value("이메일 형식으로 요청해주세요."));
+    }
+}
+```
+
+### ✅ MUST DO - Authentication Testing
+
+```java
+@Test
+@DisplayName("인증된 사용자 요청 성공")
+@WithCustomUser(email = "test@example.com")
+void getUserInfo_AuthenticatedUser_ShouldReturnUserInfo() throws Exception {
+    // given
+    UserEntity user = ContextHolderUtil.getCurrentUser();
+    
+    // when & then
+    mockMvc.perform(get("/api/users/me"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.data.email").value(user.getEmail()));
+}
+```
+
+### ❌ NEVER DO - Integration Test Violations
+
+1. **NEVER** use mock objects in integration tests
+2. **NEVER** skip database cleanup between tests
+3. **NEVER** test only happy path scenarios
+4. **NEVER** hardcode test data in integration tests
+5. **NEVER** ignore test database configuration
+
+## 📊 MANDATORY PARAMETERIZED TESTING
+
+### ✅ MUST DO - Multiple Scenario Testing
+
+```java
+@ParameterizedTest(name = "[{index}] {0}")
+@MethodSource("invalidUserCreateRequests")
+@DisplayName("회원가입 요청 실패 - 잘못된 입력")
+void createUser_InvalidRequest_ShouldReturn400(
+    String description, 
+    UserCreateRequest request, 
+    String expectedErrorMessage) throws Exception {
+    
+    // when & then
+    mockMvc.perform(post("/api/users")
+            .contentType(MediaType.APPLICATION_JSON)
+            .content(objectMapper.writeValueAsString(request)))
+        .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.reason[0]").value(expectedErrorMessage));
+}
+
+static Stream<Arguments> invalidUserCreateRequests() {
+    return Stream.of(
+        Arguments.of(
+            "이메일이 빈 문자열인 경우",
+            new UserCreateRequest("", "Test User", "password123!"),
+            "이메일은 필수입니다."
+        ),
+        Arguments.of(
+            "이메일 형식이 잘못된 경우",
+            new UserCreateRequest("invalid-email", "Test User", "password123!"),
+            "이메일 형식으로 요청해주세요."
+        ),
+        Arguments.of(
+            "이름이 빈 문자열인 경우",
+            new UserCreateRequest("test@example.com", "", "password123!"),
+            "이름은 필수입니다."
+        )
+    );
+}
+```
+
+### ✅ MUST DO - Test Data Factories
+
+```java
+// UserFactory.java
+public class UserFactory {
+    
+    public static UserEntity createMockUser(Long id) {
+        return UserEntity.builder()
+            .id(id)
+            .email("test" + id + "@example.com")
+            .password("encodedPassword")
+            .name("Test User " + id)
+            .build();
+    }
+    
+    public static UserEntity createMockUserWithoutId(String prefix) {
+        return UserEntity.builder()
+            .email(prefix + "@example.com")
+            .password("encodedPassword")
+            .name(prefix + " User")
+            .build();
+    }
+}
+```
+
+### ❌ NEVER DO - Test Data Violations
+
+1. **NEVER** hardcode test data in test methods
+2. **NEVER** reuse test data between unrelated tests
+3. **NEVER** create test data without proper cleanup
+4. **NEVER** use production data in tests
+5. **NEVER** ignore test data consistency
+
+## 🔍 MANDATORY TEST QUALITY RULES
+
+### ✅ MUST DO - Test Quality Assurance
+
+**Test Structure (AAA Pattern):**
+```java
+@Test
+@DisplayName("테스트 시나리오 설명")
+void testMethod_scenario_expectedResult() {
+    // given (Arrange)
+    // 테스트 데이터 및 모킹 설정
+    
+    // when (Act)
+    // 테스트 대상 메서드 실행
+    
+    // then (Assert)
+    // 결과 검증 및 모킹 검증
+}
+```
+
+**Assertion Best Practices:**
+```java
+// ✅ GOOD - Use AssertJ for fluent assertions
+assertThat(result).isNotNull();
+assertThat(result.getEmail()).isEqualTo("test@example.com");
+assertThat(result.getPosts()).hasSize(3);
+assertThat(result.isActive()).isTrue();
+
+// ✅ GOOD - Verify mock interactions
+verify(userRepository).save(any(UserEntity.class));
+verify(passwordEncoder).encode(password);
+verifyNoMoreInteractions(userRepository);
+
+// ❌ BAD - Don't use JUnit assertions
+assertEquals("test@example.com", result.getEmail());
+assertTrue(result.isActive());
+```
+
+### ✅ MUST DO - Test Coverage Requirements
+
+1. **Service Layer**: 90%+ coverage
+2. **Controller Layer**: 85%+ coverage
+3. **Repository Layer**: 80%+ coverage
+4. **Exception Handling**: 100% coverage
+5. **Business Logic**: 95%+ coverage
+
+### ❌ NEVER DO - Test Quality Violations
+
+1. **NEVER** ignore flaky tests
+2. **NEVER** create tests that depend on external services
+3. **NEVER** use random data without controlling randomness
+4. **NEVER** create tests that take longer than 5 seconds
+5. **NEVER** skip testing edge cases
+6. **NEVER** create tests without proper cleanup
+7. **NEVER** use deprecated testing frameworks
+
+## 🚨 CRITICAL TESTING RULES
+
+### ✅ MUST DO - Testing Checklist
+
+Before committing tests, ensure:
+
+✅ All tests pass consistently
+✅ Test names clearly describe scenarios
+✅ Tests are independent and isolated
+✅ Mock objects are properly configured
+✅ Database state is cleaned between tests
+✅ Test data is realistic but not production data
+✅ Edge cases and error scenarios are covered
+✅ Performance tests exist for critical paths
+
+### ❌ NEVER DO - Critical Test Violations
+
+1. **Test Pollution** - Tests affecting each other
+2. **Test Dependency** - Tests requiring specific execution order
+3. **Test Duplication** - Testing same logic multiple times
+4. **Test Complexity** - Tests that are hard to understand
+5. **Test Neglect** - Broken tests left unfixed
+6. **Test Shortage** - Critical paths without tests
+
+## 📈 PERFORMANCE TESTING REQUIREMENTS
+
+### ✅ MUST DO - Performance Test Examples
+
+```java
+@Test
+@DisplayName("대용량 데이터 처리 성능 테스트")
+void processLargeDataSet_ShouldCompleteWithinTimeLimit() {
+    // given
+    List<UserEntity> users = createLargeUserDataSet(10000);
+    
+    // when
+    long startTime = System.currentTimeMillis();
+    userService.processBatchUsers(users);
+    long endTime = System.currentTimeMillis();
+    
+    // then
+    long executionTime = endTime - startTime;
+    assertThat(executionTime).isLessThan(5000); // 5초 이내
+}
+```
+
+Remember: **Tests are your safety net**. Write them first, write them well, and maintain them religiously!
