@@ -9,6 +9,7 @@ import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
 import org.springframework.web.cors.CorsConfigurationSource;
 
+import com.example.demo.common.jwt.JwtAuthenticationFilter;
 import com.example.demo.common.security.filter.SecurityExceptionFilter;
 
 import lombok.RequiredArgsConstructor;
@@ -17,7 +18,7 @@ import lombok.RequiredArgsConstructor;
 @RequiredArgsConstructor
 public class SecurityConfig {
 
-	// private final JwtAuthenticationFilter jwtAuthenticationFilter;
+	private final JwtAuthenticationFilter jwtAuthenticationFilter;
 	private final CorsConfigurationSource corsConfigurationSource;
 	private final SecurityExceptionFilter securityExceptionFilter;
 
@@ -28,7 +29,8 @@ public class SecurityConfig {
 			.formLogin(AbstractHttpConfigurer::disable)
 			.authorizeHttpRequests(auth -> auth
 				.anyRequest().permitAll())
-			.addFilterBefore(securityExceptionFilter, UsernamePasswordAuthenticationFilter.class)
+			.addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class)
+			.addFilterBefore(securityExceptionFilter, JwtAuthenticationFilter.class)
 			.sessionManagement(session -> session
 				.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
 			.build();
